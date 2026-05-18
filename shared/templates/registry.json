@@ -1,0 +1,300 @@
+{
+  "$comment": "Bank-presets voor Scriptor. Per bank wordt vastgelegd: keywords voor auto-detectie, het actieve template-bestand, de LLM-extractie-prompt voor de passeeropdracht, en de mapping van geëxtraheerde velden naar template-placeholders. De webapp en n8n-workflow lezen dit bestand. Gebruikers updaten alleen het 'template_filename'-veld via de Templates-pagina (door een nieuwe .docx te uploaden); prompts en placeholder-mapping worden door ontwikkelaars onderhouden.",
+  "schema_version": 1,
+  "kadaster_extraction_prompt": "Je bent een data-extractie assistent voor een notariskantoor.\nGeef ALLEEN geldige JSON terug. Geen markdown, geen extra tekst.\nBegin direct met { — geen inleidende zin of codefence.\nAls de markdown eindigt op «…[afgekapt voor extractie-context]», gebruik alleen de zichtbare tekst; vul ontbrekende velden met \"\" of [].\n\nExtraheer uit deze Kadaster eigendomsinformatie markdown naar JSON met velden:\n- kadastrale_gemeente\n- kadastrale_sectie\n- kadastrale_nummer\n- kadastrale_grootte_woorden\n- klanten[] met: naam_hoofdletters, voornamen, geboortedatum_dag_woorden, geboortedatum_maand_woorden, geboortedatum_jaar_woorden, geboorteplaats, geboorteland\n\nMarkdown:\n{{markdown}}",
+  "legal_specialist_prompts": {
+    "$comment": "Per-onderwerp gespecialiseerde prompts voor de juridische analyse. Elke specialist krijgt een smalle context en levert aandachtspunten in dezelfde shape als de mega-prompt. Een Code node in n8n parseert het resultaat en voegt het samen met de andere specialisten en de mega-prompt-output. Specialist-categorieën zijn vast (bv. 'Vererving') — het model mag dat veld niet wijzigen.",
+    "vererving": "Je bent een ervaren kandidaat-notaris met specialisatie nalatenschappen en boedelafwikkeling. Je beoordeelt UITSLUITEND of de kadastrale eigendomsinformatie aanwijzingen bevat van vererving, overlijden van een rechthebbende, of een (onverdeelde) nalatenschap die een hypotheekvestiging blokkeert of compliceert.\n\nGeef ALLEEN geldige JSON terug. Geen markdown, geen extra tekst, geen toelichting buiten de JSON. Antwoord in het Nederlands.\n\nSchema:\n{\n  \"aandachtspunten\": [\n    {\n      \"id\": \"<korte slug, bv. 'vererving-overleden-rechthebbende'>\",\n      \"ernst\": \"kritiek\" | \"aandacht\" | \"info\",\n      \"categorie\": \"Vererving\",\n      \"titel\": \"<korte titel, max 80 tekens>\",\n      \"constatering\": \"<wat staat er concreet in de Kadaster-tekst; citeer naam/datum letterlijk waar mogelijk>\",\n      \"juridisch_kader\": \"<korte juridische duiding (1-3 zinnen)>\",\n      \"actie\": \"<concrete vervolgstap voor de behandelaar (1-2 zinnen)>\",\n      \"bronnen\": [\"kadaster\"]\n    }\n  ]\n}\n\nErnstniveaus:\n- 'kritiek' = blokkerend voor passeren (bv. een rechthebbende is overleden; onverdeelde nalatenschap).\n- 'aandacht' = behandelaar moet verifiëren of stuk opvragen (bv. mogelijke saisine, ontbrekende verklaring van erfrecht).\n- 'info' = ter informatie (bv. recent ingeschreven verklaring van erfrecht zonder vervolgactie).\n\nSignalen om te zoeken in de Kadaster-tekst (NIET-uitputtend):\n- 'Overleden' / 'overl.' / '†' achter een naam\n- Een sterfdatum (datum van overlijden) bij een rechthebbende\n- 'weduwe van' / 'weduwnaar van'\n- Inschrijving 'verklaring van erfrecht' of 'akte van verdeling'\n- Recht van vruchtgebruik op grond van wettelijke verdeling (art. 4:13 BW)\n- Een rechthebbende in een onverdeelde gemeenschap zonder akte van verdeling\n\nJuridische ankers (om aan te halen in 'juridisch_kader' waar relevant):\n- Art. 4:182 BW (saisine: erfgenamen treden van rechtswege in de plaats van de erflater)\n- Art. 4:13 BW (wettelijke verdeling; vruchtgebruik langstlevende echtgenoot)\n- Art. 3:166 BW (gemeenschap; beheer/beschikking)\n- Verklaring van erfrecht (art. 4:188 BW)\n\nStrikte regels:\n- Verzin niets. Alleen flaggen bij een concreet tekstueel signaal. Bij geen aanwijzingen: geef `{\"aandachtspunten\": []}`.\n- Maximaal 4 aandachtspunten. Eén per onderwerp.\n- Citeer in 'constatering' letterlijke tekst tussen aanhalingstekens waar mogelijk.\n- Wijzig het veld 'categorie' niet — laat het altijd 'Vererving'.\n- Het veld 'bronnen' is altijd `[\"kadaster\"]`.\n\nINPUT:\n\n=== KADASTER MARKDOWN ===\n{{kadaster_markdown}}\n",
+    "burgerlijke_staat": "Je bent een ervaren kandidaat-notaris met specialisatie familie- en huwelijksvermogensrecht. Je beoordeelt of de burgerlijke staat, samenstelling van de rechthebbenden, en/of nationaliteit — zoals die blijken uit de **passeeropdracht**, de **kadastrale eigendomsinformatie**, en **inzagestukken (zoals BRP-uitdraai, die in het kadaster-markdownblok kunnen zitten naast de kern-eigendomsinformatie)** — aanleiding geven tot een aandachtspunt bij het passeren van de hypotheekakte. Denk vooral aan art. 1:88 BW (toestemming echtgenoot/medewerking partner), buitenlands huwelijksgoederenrecht, en situaties waarin na **echtscheiding of beëindiging partnerschap** geen (volledige) **verdeling ten aanzien van het registergoed** blijkt, terwijl de **eigendomsinformatie** (nog) meerdere rechthebbenden of een **ex-partner** als mede-eigenaar suggereert.\n\nGeef ALLEEN geldige JSON terug. Geen markdown, geen extra tekst, geen toelichting buiten de JSON. Antwoord in het Nederlands.\n\nSchema:\n{\n  \"aandachtspunten\": [\n    {\n      \"id\": \"<korte slug, bv. 'burgerlijke-toestemming-echtgenoot', 'burgerlijke-scheiding-verdeling'>\",\n      \"ernst\": \"kritiek\" | \"aandacht\" | \"info\",\n      \"categorie\": \"Burgerlijke staat\",\n      \"titel\": \"<korte titel, max 80 tekens>\",\n      \"constatering\": \"<citeer letterlijk de passage(n) die het signaal ondersteunen; vermeld bron: passeeropdracht, kadaster of BRP/inzage>\",\n      \"juridisch_kader\": \"<korte duiding (1-3 zinnen) met BW-artikel of verdragsverwijzing>\",\n      \"actie\": \"<concrete vervolgstap voor de behandelaar (1-2 zinnen)>\",\n      \"bronnen\": [\"passeeropdracht\" | \"kadaster\" | \"brp\"]\n    }\n  ]\n}\n\nHet veld **bronnen** is een array met één of meer waarden uit: **\"passeeropdracht\"**, **\"kadaster\"** (eigendomsinformatie/hypothecair/kadastraal bericht), **\"brp\"** (Basisregistratie Personen of vergelijkbare identiteits/burgerlijke-staat-inzage). Kies alle bronnen die de constatering feitelijk dragen.\n\nErnstniveaus:\n- 'kritiek' = blokkerend voor passeren tenzij opgelost (bv. gehuwd in gemeenschap maar partner ontbreekt in stukken; ontbrekende toestemming art. 1:88 BW; duidelijke tegenstrijdigheid tussen BRP/kadaster en passeeropdracht over wie rechthebbende is).\n- 'aandacht' = behandelaar moet actief verifiëren of stuk opvragen (bv. huwelijkse voorwaarden ontbreken; buitenlandse nationaliteit; gescheiden/partner beëindigd maar geen akte van verdeling/mededeling verdeling ten aanzien van de woning).\n- 'info' = ter informatie of standaardcontrole.\n\nSpecifiek te beoordelen:\n1. **Art. 1:88 BW (toestemming echtgenoot / medewerking partner)**: bij vestiging van een hypotheek op de (toekomstige) echtelijke/gezinswoning is medewerking van de andere partner in beginsel vereist. Ontbreekt die partij terwijl uit stukken blijkt dat er nog een huwelijk/partnerschap is (of onzekerheid bestaat), flag dit.\n2. **Gemeenschap van goederen / huwelijkse voorwaarden**: bij gemeenschap zijn beide echtgenoten in beginsel betrokken bij de woning; bij huwelijkse voorwaarden: controleer welke goederen gemeenschappelijk/privé zijn.\n3. **Geregistreerd partnerschap**: art. 1:88 BW geldt overeenkomstig waar van toepassing.\n4. **Buitenlandse nationaliteit / geboorteland buiten NL**: beoordeel of een ander toepasselijk huwelijksgoederenrecht plausibel is (HHV 1978; Verordening (EU) 2016/1103).\n5. **Echtscheiding / beëindiging partnerschap zonder volledige verdeling t.a.v. het registergoed**: als BRP/inzage of andere stukken **gescheiden** of **partnerschap beëindigd** tonen, maar de **kadastrale eigendomsinformatie** nog **meer rechthebbenden** vermeldt dan de passeeropdracht schuldenaars, of taal gebruikt die wijst op **onverdeelde gemeenschap** / **mede-eigendom** zonder dat een verdeling ten aanzien van dit perceel blijkt — flag dit: de **ex-partner** kan nog mede-rechthebbende zijn en/of **medewerking of een verdelingsakte** kan nodig zijn vóór passeren.\n6. **Aantal rechthebbenden vs. schuldenaren**: structurele discrepantie tussen (JSON-)lijst uit kadaster-extractie en bank/passeeropdracht kan aanleiding zijn tot ‘aandacht’ wanneer dat samenvalt met relatiebreuk-signalen of meerdere naamdragers op het kadaster.\n7. **BRP / persoonslijst — huwelijks- en partnerschapsgeschiedenis**: in inzagestukken staat vaak een aparte rubriek (bijv. «Huwelijksgeschiedenis», «Partnerschapsgeschiedenis», of tabelregels met eerdere huwelijken/ontbonden huwelijken). Lees die volledig door. **Minimaal als 'info' of 'aandacht'** flaggen wanneer voor een schuldenaar/rechthebbende blijkt dat er **eerdere huwelijken of ontbonden partnerschappen** zijn (ook als de actuele «burgerlijke staat» ongecompliceerd lijkt). Citeer de relevante regel(s) en zet **bronnen** op `[\"brp\"]` (eventueel gezamenlijk met andere bronnen). Dit ter attentie voor de notaris (verificatie naamswijziging, mogelijke meewerking/medeverdeling, documentatie huwelijksgoederenrecht), niet om zelf conclusies over geldige toestemming te trekken zonder dossier.\n\nJuridische ankers (om aan te halen in 'juridisch_kader' waar relevant):\n- Art. 1:88 BW (rechtshandelingen echtelijke woning)\n- Art. 1:94 e.v. BW, art. 3:166 e.v. BW (gemeenschap; beheer/beschikking)\n- Art. 3:169–3:175 BW (beëindiging gemeenschap o.a. door echtscheiding; verdeling)\n- Art. 1:114–141 BW (huwelijkse voorwaarden)\n- Haags Huwelijksvermogensverdrag 1978 / Verordening (EU) 2016/1103\n- Art. 1:80a–80b BW (geregistreerd partnerschap)\n\nStrikte regels:\n- Verzin niets. Alleen flaggen bij een concreet signaal in de aangeleverde blokken. Bij geen aanwijzingen: `{\"aandachtspunten\": []}`.\n- Maximaal 4 aandachtspunten. Eén per kernonderwerp.\n- Citeer in 'constatering' letterlijk tekst tussen aanhalingstekens waar mogelijk.\n- Wijzig het veld 'categorie' niet — laat het altijd 'Burgerlijke staat'.\n\nINPUT:\n\n=== KLANTEN UIT PASSEEROPDRACHT (JSON) ===\n{{klanten_json}}\n\n=== RECHTHEBBENDEN UIT KADASTER-EXTRACTIE (JSON; lege array als niet beschikbaar) ===\n{{kadaster_klanten_json}}\n\n=== PASSEEROPDRACHT (markdown) ===\n{{bank_markdown}}\n\n=== KADASTER, EIGENDOMSINFORMATIE EN OVERIGE INZAGE (markdown; kan BRP e.d. bevatten) ===\n{{kadaster_markdown}}\n",
+    "lasten": "Je bent een ervaren kandidaat-notaris met specialisatie onroerend goed en aktepasseren. Je beoordeelt UITSLUITEND of de kadastrale eigendomsinformatie aanwijzingen bevat van beslagen, beperkte rechten, of (kwalitatieve / ketting-) verplichtingen die de hypotheekvestiging blokkeren of een aanvullende actie van de notaris vereisen.\n\nLET OP: een 'bestaande hypotheek' die door dezelfde bank wordt geroyeerd bij passeren is GEEN aandachtspunt — dat regelt de notaris zelf. Flag alleen bestaande hypotheken van DERDE PARTIJEN die niet automatisch geroyeerd worden.\n\nGeef ALLEEN geldige JSON terug. Geen markdown, geen extra tekst, geen toelichting buiten de JSON. Antwoord in het Nederlands.\n\nSchema:\n{\n  \"aandachtspunten\": [\n    {\n      \"id\": \"<korte slug, bv. 'lasten-beslag', 'lasten-erfpacht', 'lasten-vruchtgebruik'>\",\n      \"ernst\": \"kritiek\" | \"aandacht\" | \"info\",\n      \"categorie\": \"Lasten en beperkingen\",\n      \"titel\": \"<korte titel, max 80 tekens>\",\n      \"constatering\": \"<citeer letterlijk de relevante zin/passage uit het Kadaster>\",\n      \"juridisch_kader\": \"<korte juridische duiding (1-3 zinnen) met BW-artikel waar relevant>\",\n      \"actie\": \"<concrete vervolgstap voor de behandelaar (1-2 zinnen)>\",\n      \"bronnen\": [\"kadaster\"]\n    }\n  ]\n}\n\nErnstniveaus:\n- 'kritiek' = blokkerend voor passeren tenzij opgelost (bv. een actief executoriaal of conservatoir beslag op het onderpand; ongeroyeerde hypotheek van een derde partij).\n- 'aandacht' = behandelaar moet verifiëren of stuk opvragen (bv. erfpacht waarvan de voorwaarden niet bekend zijn; vruchtgebruik; huurbeding).\n- 'info' = ter informatie of standaardcontrole (bv. ingeschreven kettingbeding zonder directe blokker; voorkeursrecht gemeente dat niet wordt uitgeoefend).\n\nSignalen om te zoeken in de Kadaster-tekst (NIET-uitputtend):\n- 'Beslag' / 'beslaglegger' / 'executoriaal beslag' / 'conservatoir beslag'\n- 'Erfpacht' / 'recht van erfpacht'\n- 'Recht van opstal' / 'opstalrecht'\n- 'Vruchtgebruik' / 'recht van vruchtgebruik'\n- 'Huurbeding' (let op: anders dan 'huur' op zich)\n- 'Kettingbeding' / 'kwalitatieve verplichting' (art. 6:252 BW)\n- 'Wet voorkeursrecht gemeenten' / 'Wvg' / 'voorkeursrecht'\n- 'Exploitatiebijdrage' / 'baatbelasting' / 'wegenfonds'\n- Een ingeschreven hypotheek (oudere registratie) waarvan niet duidelijk is dat die wordt doorgehaald\n\nJuridische ankers:\n- Beslagen: art. 3:268 BW (executoriale verkoop hypotheekhouder); Rv. Boek 3 (executoriaal beslag)\n- Erfpacht: art. 5:85 BW e.v.\n- Opstal: art. 5:101 BW e.v.\n- Vruchtgebruik: art. 3:201 BW e.v.\n- Huurbeding: art. 3:264 BW\n- Kettingbeding / kwalitatieve verplichting: art. 6:252 BW\n- Wet voorkeursrecht gemeenten (Wvg)\n\nStrikte regels:\n- Verzin niets. Alleen flaggen bij een concreet tekstueel signaal. Bij geen aanwijzingen: geef `{\"aandachtspunten\": []}`.\n- Maximaal 5 aandachtspunten. Eén per onderwerp/object.\n- Citeer in 'constatering' letterlijke tekst tussen aanhalingstekens waar mogelijk.\n- Wijzig het veld 'categorie' niet — laat het altijd 'Lasten en beperkingen'.\n- Het veld 'bronnen' is altijd `[\"kadaster\"]`.\n\nINPUT:\n\n=== KADASTER MARKDOWN ===\n{{kadaster_markdown}}\n"
+  },
+  "legal_analysis_prompt": "Je bent een ervaren kandidaat-notaris bij een Nederlands notariskantoor en je beoordeelt een hypotheekdossier op juridische aandachtspunten voor de behandelaar.\n\nLET OP: een aantal onderwerpen wordt door GESPECIALISEERDE agents/regels afgehandeld voordat jouw output wordt samengevoegd. Jij MAG die onderwerpen NIET nog eens opvoeren:\n- Vererving / overleden rechthebbende / nalatenschap → behandeld door specialist (categorie 'Vererving').\n- Beslagen, erfpacht, opstal, vruchtgebruik, huurbeding, kettingbeding, kwalitatieve verplichting, voorkeursrecht gemeente → behandeld door specialist (categorie 'Lasten en beperkingen').\n- Burgerlijke staat (o.a. art. 1:88 BW, gemeenschap/partnerschap, huwelijkse voorwaarden, buitenlands huwelijksgoederenrecht/nationaliteit, echtscheiding/partnerschapsbeëindiging zonder volledige verdeling t.a.v. het registergoed, ex-partner als mede-rechthebbende) → behandeld door specialist (categorie 'Burgerlijke staat'); gebruikt passeeropdracht, kadaster én inzage (zoals BRP).\n- Klantentelling-mismatch, achternaam-mismatch tussen bank en kadaster, en onderpand-woonplaats vs. kadastrale gemeente → behandeld door deterministische checks (categorie 'Identiteit'/'Onderpand').\n\nJe krijgt drie stukken input:\n1. De ruwe Markdown-tekst van de bank-passeeropdracht.\n2. De ruwe Markdown-tekst van de Kadaster eigendomsinformatie.\n3. Een JSON met door een eerdere LLM-stap geëxtraheerde gestructureerde data uit beide documenten.\n\nGeef ALLEEN geldige JSON terug. Geen markdown, geen extra tekst, geen toelichting buiten de JSON. Antwoord in het Nederlands.\n\nSchema:\n{\n  \"samenvatting\": \"<2-4 zinnen voor de behandelaar: wat is de strekking van het dossier en wat zijn de hoofdpunten>\",\n  \"aandachtspunten\": [\n    {\n      \"id\": \"<korte slug>\",\n      \"ernst\": \"kritiek\" | \"aandacht\" | \"info\",\n      \"categorie\": \"Identiteit\" | \"Onderpand\" | \"Bedragen\" | \"Documentatie\" | \"Overig\",\n      \"titel\": \"<korte titel, max 80 tekens>\",\n      \"constatering\": \"<wat is concreet geconstateerd in de stukken; citeer relevante naam/datum/perceel>\",\n      \"juridisch_kader\": \"<korte juridische duiding (1-3 zinnen) waarom dit relevant is>\",\n      \"actie\": \"<concrete vervolgstap voor de behandelaar (1-2 zinnen)>\",\n      \"bronnen\": [\"passeeropdracht\" | \"kadaster\" | \"extractie\"]\n    }\n  ]\n}\n\nErnstniveaus:\n- 'kritiek' = blokkerend voor passeren tenzij opgelost (bv. ontbrekende toestemming echtgenoot, beslag).\n- 'aandacht' = behandelaar moet actief verifiëren of stuk opvragen voor passeren (bv. NHG-stukken, nationaliteit/huwelijksgoederenrecht).\n- 'info' = ter informatie of standaardcontrole (bv. modelakte-versie, bankvolmacht).\n\nControleer in elk geval (waar relevant):\n1. **NHG / overbrugging / verpandingen**: zijn benodigde stukken (offerte, verzekeringspolis, beleggingsrekening) genoemd maar mogelijk niet aangeleverd?\n2. **Identiteit**: zijn paspoort/ID-nummers en/of UBO-stukken nodig en zijn ze (vermoedelijk) aanwezig?\n3. **Modelakte / volmacht**: is de modelakte-versie genoemd en de bankvolmachthouder bekend?\n\nRegels:\n- Verzin geen aandachtspunten zonder duidelijke aanleiding in de stukken. Bij twijfel: 'aandacht' niveau met expliciete formulering 'verifieer'.\n- Maximaal 6 aandachtspunten. Sorteer ze in de array op ernst: kritiek → aandacht → info.\n- Gebruik categorie NIET 'Vererving', 'Lasten en beperkingen' of 'Burgerlijke staat' — die zijn voorbehouden aan de specialisten.\n- Als er echt geen aandachtspunten zijn, geef een lege array maar ALTIJD nog een samenvatting.\n- Citeer in 'constatering' letterlijke tekst tussen aanhalingstekens waar mogelijk.\n\nINPUT:\n\n=== PASSEEROPDRACHT MARKDOWN ===\n{{bank_markdown}}\n\n=== KADASTER MARKDOWN ===\n{{kadaster_markdown}}\n\n=== GEËXTRAHEERDE DATA (JSON) ===\n{{extracted_json}}\n",
+  "banks": {
+    "rabobank": {
+      "$status": "READY voor end-to-end test op basis van ECH-passeeropdracht. Notariële velden (akte-datum, notarisnaam, plaats, tijd, verkrijgingstitel) blijven leeg en worden door de notaris in Word ingevuld.",
+      "display_name": "Rabobank",
+      "keywords": [
+        "rabobank",
+        "rabohypotheek",
+        "ECH"
+      ],
+      "template_filename": "template_HYRABO00.docx",
+      "uploaded_at": "2026-05-05T00:00:00Z",
+      "uploaded_by": "system",
+      "model_code": "HYRABO00",
+      "model_version": "H1-2018 (01-09-2018)",
+      "extraction_prompt": "Je bent een data-extractie assistent voor een notariskantoor.\nGeef ALLEEN geldige JSON terug. Geen markdown, geen extra tekst.\n\nExtraheer uit deze Rabobank passeeropdracht markdown naar JSON met velden:\n- ech_zaaknummer\n- inschrijvingsbedrag_cijfer\n- inschrijvingsbedrag_woorden\n- opslag_cijfer\n- opslag_woorden\n- totaal_hypotheek_cijfer\n- totaal_hypotheek_woorden\n- onderpand_straat\n- onderpand_huisnummer\n- onderpand_postcode\n- onderpand_woonplaats\n- modelakte_code\n- klanten[] met: naam_hoofdletters, voornamen, nationaliteit\n\nMarkdown:\n{{markdown}}",
+      "placeholders": {
+        "<<ECH_ZAAKNUMMER>>": [
+          "bank.ech_zaaknummer"
+        ],
+        "<<BANK_VOLMACHTHOUDER>>": [],
+        "<<AKTE_DATUM>>": [],
+        "<<NOTARIS_NAAM>>": [],
+        "<<NOTARIS_STANDPLAATS>>": [],
+        "<<AKTE_PLAATS>>": [],
+        "<<AKTE_TIJDSTIP>>": [],
+        "<<VERKRIJGING_TITEL_1>>": [],
+        "<<INSCHRIJVINGSBEDRAG_CIJFER>>": [
+          "bank.inschrijvingsbedrag_cijfer"
+        ],
+        "<<INSCHRIJVINGSBEDRAG_WOORDEN>>": [
+          "bank.inschrijvingsbedrag_woorden"
+        ],
+        "<<OPSLAG_CIJFER>>": [
+          "bank.opslag_cijfer"
+        ],
+        "<<OPSLAG_WOORDEN>>": [
+          "bank.opslag_woorden"
+        ],
+        "<<TOTAAL_HYPOTHEEK_CIJFER>>": [
+          "bank.totaal_hypotheek_cijfer"
+        ],
+        "<<TOTAAL_HYPOTHEEK_WOORDEN>>": [
+          "bank.totaal_hypotheek_woorden"
+        ],
+        "<<ONDERPAND_STRAAT>>": [
+          "bank.onderpand_straat"
+        ],
+        "<<ONDERPAND_HUISNUMMER>>": [
+          "bank.onderpand_huisnummer"
+        ],
+        "<<ONDERPAND_POSTCODE>>": [
+          "bank.onderpand_postcode"
+        ],
+        "<<ONDERPAND_WOONPLAATS>>": [
+          "bank.onderpand_woonplaats"
+        ],
+        "<<KAD_GEMEENTE>>": [
+          "kadaster.kadastrale_gemeente"
+        ],
+        "<<KAD_SECTIE>>": [
+          "kadaster.kadastrale_sectie"
+        ],
+        "<<KAD_NUMMER>>": [
+          "kadaster.kadastrale_nummer"
+        ],
+        "<<KAD_GROOTTE_WOORDEN>>": [
+          "kadaster.kadastrale_grootte_woorden"
+        ],
+        "<<NAAM_1_HOOFDLETTERS>>": [
+          "kadaster.klanten[0].naam_hoofdletters",
+          "bank.klanten[0].naam_hoofdletters"
+        ],
+        "<<VOORNAMEN_1>>": [
+          "kadaster.klanten[0].voornamen",
+          "bank.klanten[0].voornamen"
+        ],
+        "<<GEBOORTEDAG_1_WOORDEN>>": [
+          "kadaster.klanten[0].geboortedatum_dag_woorden"
+        ],
+        "<<GEBOORTEMAAND_1_WOORDEN>>": [
+          "kadaster.klanten[0].geboortedatum_maand_woorden"
+        ],
+        "<<GEBOORTEJAAR_1_WOORDEN>>": [
+          "kadaster.klanten[0].geboortedatum_jaar_woorden"
+        ],
+        "<<GEBOORTEPLAATS_1>>": [
+          "kadaster.klanten[0].geboorteplaats"
+        ],
+        "<<NAAM_2_HOOFDLETTERS>>": [
+          "kadaster.klanten[1].naam_hoofdletters",
+          "bank.klanten[1].naam_hoofdletters"
+        ],
+        "<<VOORNAMEN_2>>": [
+          "kadaster.klanten[1].voornamen",
+          "bank.klanten[1].voornamen"
+        ],
+        "<<GEBOORTEDAG_2_WOORDEN>>": [
+          "kadaster.klanten[1].geboortedatum_dag_woorden"
+        ],
+        "<<GEBOORTEMAAND_2_WOORDEN>>": [
+          "kadaster.klanten[1].geboortedatum_maand_woorden"
+        ],
+        "<<GEBOORTEJAAR_2_WOORDEN>>": [
+          "kadaster.klanten[1].geboortedatum_jaar_woorden"
+        ],
+        "<<GEBOORTEPLAATS_2>>": [
+          "kadaster.klanten[1].geboorteplaats"
+        ]
+      },
+      "conditional_blocks": {
+        "client_2": [
+          "kadaster.klanten[1].naam_hoofdletters"
+        ]
+      }
+    },
+    "abnamro": {
+      "$status": "READY voor end-to-end test op basis van NTI-passeeropdracht (Stater-formaat). Notariële velden (akte-datum, notarisnaam, plaats, tijd) blijven leeg en moeten door de notaris ingevuld worden.",
+      "display_name": "ABN AMRO",
+      "keywords": [
+        "abn amro",
+        "abnamro",
+        "abn-amro",
+        "abn amro bank",
+        "aab18.01",
+        "aab18-01",
+        "hystaa00",
+        "notarisinstructie"
+      ],
+      "template_filename": "template_HYSTAA00.docx",
+      "uploaded_at": "2026-05-03T00:00:00Z",
+      "uploaded_by": "system",
+      "model_code": "HYSTAA00",
+      "model_version": "AAB18-01 (19-02-2018)",
+      "extraction_prompt": "Je bent een data-extractie assistent voor een notariskantoor.\nGeef ALLEEN geldige JSON terug. Geen markdown, geen extra tekst.\n\nDe input is een ABN AMRO Notarisinstructie (passeeropdracht via Stater) in markdown-formaat. Deze gebruikt een genummerde puntenlijst onder de kop \"VOORLOPIGE GEGEVENS\". Punten met de tekst \"niet opnemen\" of \"Niet opnemen\" betekenen dat het bijbehorende blok van de modelakte WEGGELATEN moet worden (boolean = false).\n\nExtraheer naar JSON met de volgende velden:\n\n- offertenummer: het ABN AMRO referentienummer (bv. \"700.374.651\"); te vinden in de header en bij \"VOORLOPIGE GEGEVENS\". Punten en spaties behouden.\n- model_code: de modelakte-code (bv. \"AAB18.01\")\n- klanten: array met objecten per schuldenaar zoals vermeld onder punt 1, met velden:\n    - volledige_naam (bv. \"Willem Jan Vissers\")\n    - geboortedatum_cijfers (bv. \"21 maart 1983\")\n    - burgerlijke_staat (bv. \"gehuwd in gem. v. goed. 1e echt\")\n    - adres_straat_huisnummer\n    - adres_postcode\n    - adres_woonplaats\n- hoofdsom_cijfer: punt 2.1, het leningbedrag (bv. \"EUR 65.000,00\")\n- inschrijvingsbedrag_cijfer: punt 4.1\n- opslag_cijfer: punt 4.2\n- totaal_hypotheek_cijfer: punt 4.3\n- type_hypotheek: punt 4.4 in woorden, omgezet uit \"1e\"/\"2e\"/\"3e\" naar \"eerste\"/\"tweede\"/\"derde\"; bij ontbreken \"eerste\"\n- onderpand_straat: punt 4.5 (alleen straatnaam)\n- onderpand_huisnummer: punt 4.5 (alleen huisnummer + eventuele toevoeging)\n- onderpand_postcode: punt 4.5 (postcode)\n- onderpand_woonplaats: punt 4.5 (plaats)\n- svn_starterslening (boolean): punt 3 — true als inhoud, false bij \"niet opnemen\"\n- overbrugging (boolean): punt 5 — true als inhoud, false bij \"niet opnemen\"\n- overbrugging_type_hypotheek: indien overbrugging=true, woorden \"eerste\"/\"tweede\"/\"derde\"\n- verpanding_verzekering (boolean): punt 7.1 — true bij inhoud, false bij \"niet opnemen\"\n- verpanding_belegging (boolean): punt 7.2 — true bij inhoud, false bij \"niet opnemen\"\n- beleggingsrekening_nummer (string|null): indien punt 7.2 inhoud heeft\n- beleggingsrekening_instelling (string|null): indien punt 7.2 inhoud heeft\n- verpanding_spaarrekening (boolean): punt 7.3 — true bij inhoud, false bij \"niet opnemen\"\n- spaarrekening_nummer (string|null): indien punt 7.3 inhoud heeft\n- verpanding_aflossing (boolean): punt 7.4 — true bij inhoud, false bij \"niet opnemen\"\n- aflossingsrekening_nummer (string|null): indien punt 7.4 inhoud heeft\n- levensverzekering (boolean): punt 11 — true bij inhoud (begunstiging-aanwijzing), false bij \"niet opnemen\"\n- verzekeraar_naam (string|null): indien punt 11 inhoud heeft\n- polisnummer (string|null): indien punt 11 inhoud heeft\n- nhg (boolean): punt 12 (BORGSTELLING) — true bij inhoud (Nationale Hypotheek Garantie van toepassing), false bij \"niet opnemen\"\n- overheidsbijdrage (boolean): punt 13 — true bij inhoud, false bij \"niet opnemen\"\n\nMarkdown:\n{{markdown}}",
+      "placeholders": {
+        "<<OFFERTENUMMER>>": [
+          "bank.offertenummer"
+        ],
+        "<<BANK_VOLMACHTHOUDER>>": [],
+        "<<AKTE_DATUM>>": [],
+        "<<NOTARIS_NAAM>>": [],
+        "<<NOTARIS_STANDPLAATS>>": [],
+        "<<AKTE_PLAATS>>": [],
+        "<<AKTE_TIJDSTIP>>": [],
+        "<<HOOFDSOM_CIJFER>>": [
+          "bank.hoofdsom_cijfer"
+        ],
+        "<<INSCHRIJVINGSBEDRAG_CIJFER>>": [
+          "bank.inschrijvingsbedrag_cijfer"
+        ],
+        "<<OPSLAG_CIJFER>>": [
+          "bank.opslag_cijfer"
+        ],
+        "<<TOTAAL_HYPOTHEEK_CIJFER>>": [
+          "bank.totaal_hypotheek_cijfer"
+        ],
+        "<<TYPE_HYPOTHEEK_1>>": [
+          "bank.type_hypotheek"
+        ],
+        "<<TYPE_HYPOTHEEK_OVERBRUGGING>>": [
+          "bank.overbrugging_type_hypotheek"
+        ],
+        "<<ONDERPAND_STRAAT>>": [
+          "bank.onderpand_straat"
+        ],
+        "<<ONDERPAND_HUISNUMMER>>": [
+          "bank.onderpand_huisnummer"
+        ],
+        "<<ONDERPAND_POSTCODE>>": [
+          "bank.onderpand_postcode"
+        ],
+        "<<ONDERPAND_WOONPLAATS>>": [
+          "bank.onderpand_woonplaats"
+        ],
+        "<<KAD_GEMEENTE>>": [
+          "kadaster.kadastrale_gemeente"
+        ],
+        "<<KAD_SECTIE>>": [
+          "kadaster.kadastrale_sectie"
+        ],
+        "<<KAD_NUMMER>>": [
+          "kadaster.kadastrale_nummer"
+        ],
+        "<<KAD_GROOTTE_WOORDEN>>": [
+          "kadaster.kadastrale_grootte_woorden"
+        ],
+        "<<ONDERPAND_OVERBRUGGING_BLOK>>": [],
+        "<<VERKRIJGING_TITEL_1>>": [],
+        "<<VERKRIJGING_TITEL_OVERBRUGGING>>": [],
+        "<<VERZEKERAAR_NAAM>>": [
+          "bank.verzekeraar_naam"
+        ],
+        "<<POLISNUMMER>>": [
+          "bank.polisnummer"
+        ],
+        "<<BELEGGINGSREKENING_NUMMER>>": [
+          "bank.beleggingsrekening_nummer"
+        ],
+        "<<BELEGGINGSREKENING_INSTELLING>>": [
+          "bank.beleggingsrekening_instelling"
+        ],
+        "<<SPAARREKENING_NUMMER>>": [
+          "bank.spaarrekening_nummer"
+        ],
+        "<<AFLOSSINGSREKENING_NUMMER>>": [
+          "bank.aflossingsrekening_nummer"
+        ],
+        "<<NAAM_1_HOOFDLETTERS>>": [
+          "kadaster.klanten[0].naam_hoofdletters"
+        ],
+        "<<VOORNAMEN_1>>": [
+          "kadaster.klanten[0].voornamen"
+        ],
+        "<<GEBOORTEDAG_1_WOORDEN>>": [
+          "kadaster.klanten[0].geboortedatum_dag_woorden"
+        ],
+        "<<GEBOORTEMAAND_1_WOORDEN>>": [
+          "kadaster.klanten[0].geboortedatum_maand_woorden"
+        ],
+        "<<GEBOORTEJAAR_1_WOORDEN>>": [
+          "kadaster.klanten[0].geboortedatum_jaar_woorden"
+        ],
+        "<<GEBOORTEPLAATS_1>>": [
+          "kadaster.klanten[0].geboorteplaats"
+        ],
+        "<<NAAM_2_HOOFDLETTERS>>": [
+          "kadaster.klanten[1].naam_hoofdletters"
+        ],
+        "<<VOORNAMEN_2>>": [
+          "kadaster.klanten[1].voornamen"
+        ],
+        "<<GEBOORTEDAG_2_WOORDEN>>": [
+          "kadaster.klanten[1].geboortedatum_dag_woorden"
+        ],
+        "<<GEBOORTEMAAND_2_WOORDEN>>": [
+          "kadaster.klanten[1].geboortedatum_maand_woorden"
+        ],
+        "<<GEBOORTEJAAR_2_WOORDEN>>": [
+          "kadaster.klanten[1].geboortedatum_jaar_woorden"
+        ],
+        "<<GEBOORTEPLAATS_2>>": [
+          "kadaster.klanten[1].geboorteplaats"
+        ]
+      },
+      "conditional_blocks": {
+        "client_2": [
+          "kadaster.klanten[1].naam_hoofdletters"
+        ],
+        "overbrugging": [
+          "bank.overbrugging"
+        ],
+        "nhg": [
+          "bank.nhg"
+        ],
+        "levensverzekering": [
+          "bank.levensverzekering"
+        ],
+        "verpanding_verzekering": [
+          "bank.verpanding_verzekering"
+        ],
+        "verpanding_belegging": [
+          "bank.verpanding_belegging"
+        ],
+        "verpanding_spaarrekening": [
+          "bank.verpanding_spaarrekening"
+        ],
+        "verpanding_aflossing": [
+          "bank.verpanding_aflossing"
+        ],
+        "overheidsbijdrage": [
+          "bank.overheidsbijdrage"
+        ]
+      }
+    }
+  },
+  "flex_analysis_prompt": "Je bent een ervaren kandidaat-notaris bij een Nederlands notariskantoor en je beoordeelt een hypotheekdossier op juridische aandachtspunten voor de behandelaar.\n\nIn deze analyse-only-flow zijn ALLE aangeleverde documenten (passeeropdracht, kadasterstukken, BRP-uitdraai, CIR-recherche, en overige dossier-stukken) gecombineerd in één tekstblok. Er is geen aparte gestructureerde extractie beschikbaar. Baseer je analyse volledig op de ruwe tekst.\n\nGeef ALLEEN geldige JSON terug. Geen markdown, geen extra tekst, geen toelichting buiten de JSON. Antwoord in het Nederlands.\n\nSchema:\n{\n  \"samenvatting\": \"<2-4 zinnen voor de behandelaar: wat is de strekking van het dossier en wat zijn de hoofdpunten>\",\n  \"aandachtspunten\": [\n    {\n      \"id\": \"<korte slug>\",\n      \"ernst\": \"kritiek | aandacht | info\",\n      \"categorie\": \"Identiteit | Onderpand | Bedragen | Documentatie | Burgerlijke staat | Vererving | Lasten en beperkingen | Overig\",\n      \"titel\": \"<korte titel, max 80 tekens>\",\n      \"constatering\": \"<wat is concreet geconstateerd; citeer relevante passage letterlijk>\",\n      \"juridisch_kader\": \"<korte juridische duiding (1-3 zinnen)>\",\n      \"actie\": \"<concrete vervolgstap voor de behandelaar (1-2 zinnen)>\",\n      \"bronnen\": [\"passeeropdracht\", \"kadaster\", \"brp\", \"overig\"]\n    }\n  ]\n}\n\nErnstniveaus:\n- 'kritiek' = blokkerend voor passeren tenzij opgelost.\n- 'aandacht' = behandelaar moet actief verifiëren of stuk opvragen.\n- 'info' = ter informatie of standaardcontrole.\n\nControleer de volgende categorieën:\n\n**1. Burgerlijke staat (altijd controleren — ook bij BRP-uitdraai)**\nZoek in ALLE stukken naar huwelijk, partnerschap, echtscheiding, beëindigd partnerschap, weduwe/weduwnaar.\nKijk specifiek in BRP-uitdraai naar: rubriek «Huwelijks geschiedenis», «Partnerschapsgeschiedenis», «Datum ontbinding», «Reden ontbinding», eerdere huwelijken.\n- Minimaal 'info' bij weduwe/weduwnaar of eerder huwelijk/ontbonden partnerschap (ook als ongecompliceerd) — bronnen: [\"brp\"].\n- 'aandacht' bij: actief huwelijk/partnerschap waarbij de andere partner niet in de stukken meewerkt; echtscheiding zonder zichtbare verdeling van het registergoed; buitenlandse nationaliteit of geboorteland buiten NL.\n- 'kritiek' bij: ontbrekende medewerking ex art. 1:88 BW terwijl er een actueel huwelijk/geregistreerd partnerschap blijkt.\nJuridische ankers: art. 1:88 BW, art. 3:166 BW, HHV 1978 / Verordening (EU) 2016/1103.\n\n**2. Vererving**\nZoek naar overlijden van rechthebbende, †, sterfdatum, verklaring van erfrecht, onverdeelde nalatenschap.\nJuridische ankers: art. 4:182 BW (saisine), art. 4:13 BW (wettelijke verdeling).\n\n**3. Lasten en beperkingen**\nZoek naar: beslag, erfpacht, opstalrecht, vruchtgebruik, huurbeding, kettingbeding, kwalitatieve verplichting, voorkeursrecht, hypotheek van derde partij.\nLET OP: een bestaande hypotheek van dezelfde bank die bij passeren wordt geroyeerd is GEEN aandachtspunt.\n\n**4. Identiteit & onderpand**\nNaamverschillen tussen stukken. Afwijking onderpand-adres vs. kadastrale gemeente.\n\n**5. Documentatie**\nNHG, overbrugging, verzekeringspolis, bankvolmacht, modelakte-versie.\n\nRegels:\n- Verzin geen aandachtspunten zonder duidelijke aanleiding in de stukken. Bij twijfel: 'aandacht' met 'verifieer'.\n- Maximaal 10 aandachtspunten. Sorteer op ernst: kritiek → aandacht → info.\n- Als er echt geen aandachtspunten zijn, geef een lege array maar ALTIJD een samenvatting.\n- Citeer in 'constatering' letterlijke tekst tussen aanhalingstekens waar mogelijk.\n- Gebruik bronnen: [\"brp\"] als het signaal uit een BRP-uitdraai of persoonslijst komt.\n\nINPUT:\n\n=== ALLE DOCUMENTEN (gecombineerd) ===\n{{bank_markdown}}\n",
+  "context_limits": {
+    "$comment": "Max char-length voor markdown-clamping in extractie- en analyse-prompts. Verspreid voorheen als magic numbers door de Code-nodes; centraal beheer voorkomt drift bij wijzigingen aan het context-venster.",
+    "collapse_per_doc": 26000,
+    "analysis_bank": 14000,
+    "analysis_kadaster": 14000,
+    "analysis_extracted_json": 8000,
+    "specialist_vererving": 14000,
+    "specialist_lasten": 14000,
+    "specialist_burgerlijke_bank": 10000,
+    "specialist_burgerlijke_kadaster": 26000,
+    "specialist_burgerlijke_analyse_combined": 26000
+  }
+}
