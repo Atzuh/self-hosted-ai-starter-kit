@@ -212,14 +212,27 @@
     },
     {
       "parameters": {
-        "command": "=python3 /data/shared/genereer_juridische_analyse.py --analysis {{ JSON.stringify(JSON.stringify($json.analysis)) }} --zaaknummer '{{ $('Aggregate Markdowns').first().json.zaaknummer }}' --bank '{{ $('Aggregate Markdowns').first().json.bankDisplayName }}' --klant '{{ $('Aggregate Markdowns').first().json.klantSamenvatting }}'"
+        "jsCode": "// Args naar tijdelijk JSON-bestand schrijven voor genereer_juridische_analyse.py\n// (analyse-only flow). Python-script verwijdert het bestand na inlezen.\nconst fs = require('fs');\nconst execId = String($execution.id || 'single').replace(/[^0-9A-Za-z_-]/g, '_').slice(0, 32);\nconst argsFile = `/tmp/n8n_args_flex_analyse_${execId}_${Date.now()}.json`;\nconst meta = $('Aggregate Markdowns').first()?.json || {};\nconst j = $json || {};\nconst payload = {\n  analysis: j.analysis || {},\n  zaaknummer: String(meta.zaaknummer || ''),\n  bank: String(meta.bankDisplayName || ''),\n  klant: String(meta.klantSamenvatting || ''),\n};\nfs.writeFileSync(argsFile, JSON.stringify(payload), 'utf8');\nreturn { json: { ...j, argsFile } };"
+      },
+      "id": "c0a1b2c3-0014-4f00-aaaa-a663f6aa00a2",
+      "name": "Write Flex Analyse Args",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1745,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=python3 /data/shared/genereer_juridische_analyse.py --args-file '{{ $json.argsFile }}'"
       },
       "id": "c0a1b2c3-0007-4f00-aaaa-a663f6aa0026",
       "name": "Generate Flex Analysis DOCX",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        1870,
+        1935,
         80
       ]
     },
@@ -343,14 +356,27 @@
     },
     {
       "parameters": {
-        "command": "=python3 /data/shared/vul_template_in.py --template '{{ $json.templatePath }}' --placeholders {{ JSON.stringify(JSON.stringify($json.placeholders)) }} --zaaknummer '{{ $json.zaaknummer }}'"
+        "jsCode": "// Schrijft de Python-argumenten naar een tijdelijk JSON-bestand zodat\n// executeCommand geen payload-data hoeft te interpoleren via single-quotes.\n// Voorkomt shell-injection bij apostrofs of quotes in zaaknummer/klant/etc.\n// vul_template_in.py verwijdert het bestand na inlezen (best-effort cleanup).\nconst fs = require('fs');\nconst execId = String($execution.id || 'single').replace(/[^0-9A-Za-z_-]/g, '_').slice(0, 32);\nconst argsFile = `/tmp/n8n_args_akte_${execId}_${Date.now()}.json`;\nconst j = $json || {};\nconst payload = {\n  template: j.templatePath,\n  placeholders: j.placeholders,\n  zaaknummer: String(j.zaaknummer || ''),\n};\nfs.writeFileSync(argsFile, JSON.stringify(payload), 'utf8');\nreturn { json: { ...j, argsFile } };"
+      },
+      "id": "c0a1b2c3-0012-4f00-aaaa-a663f6aa00a0",
+      "name": "Write Akte Args",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1810,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=python3 /data/shared/vul_template_in.py --args-file '{{ $json.argsFile }}'"
       },
       "id": "f0d12f6b-c1d8-43fa-8d8f-a663f6aa0003",
       "name": "Generate DOCX",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        1870,
+        1935,
         280
       ]
     },
@@ -662,14 +688,27 @@
     },
     {
       "parameters": {
-        "command": "=python3 /data/shared/genereer_juridische_analyse.py --analysis {{ JSON.stringify(JSON.stringify($json.analysis)) }} --zaaknummer '{{ $('Build Placeholders').first().json.zaaknummer }}' --bank '{{ $('Build Placeholders').first().json.bankDisplayName }}' --klant '{{ $('Build Placeholders').first().json.klantSamenvatting }}'"
+        "jsCode": "// Args naar tijdelijk JSON-bestand schrijven voor genereer_juridische_analyse.py.\n// Python-script verwijdert het bestand na inlezen.\nconst fs = require('fs');\nconst execId = String($execution.id || 'single').replace(/[^0-9A-Za-z_-]/g, '_').slice(0, 32);\nconst argsFile = `/tmp/n8n_args_analyse_${execId}_${Date.now()}.json`;\nconst meta = $('Build Placeholders').first()?.json || {};\nconst j = $json || {};\nconst payload = {\n  analysis: j.analysis || {},\n  zaaknummer: String(meta.zaaknummer || ''),\n  bank: String(meta.bankDisplayName || ''),\n  klant: String(meta.klantSamenvatting || ''),\n};\nfs.writeFileSync(argsFile, JSON.stringify(payload), 'utf8');\nreturn { json: { ...j, argsFile } };"
+      },
+      "id": "c0a1b2c3-0013-4f00-aaaa-a663f6aa00a1",
+      "name": "Write Analyse Args",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3995,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=python3 /data/shared/genereer_juridische_analyse.py --args-file '{{ $json.argsFile }}'"
       },
       "id": "a1c4d2f0-7e6a-4b50-9b90-a663f6aa0034",
       "name": "Generate Analysis DOCX",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        4120,
+        4185,
         380
       ]
     },
@@ -901,6 +940,17 @@
       "main": [
         [
           {
+            "node": "Write Flex Analyse Args",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Flex Analyse Args": {
+      "main": [
+        [
+          {
             "node": "Generate Flex Analysis DOCX",
             "type": "main",
             "index": 0
@@ -997,6 +1047,17 @@
       ]
     },
     "Deterministic Checks": {
+      "main": [
+        [
+          {
+            "node": "Write Akte Args",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Akte Args": {
       "main": [
         [
           {
@@ -1202,6 +1263,17 @@
       ]
     },
     "Parse Analysis JSON": {
+      "main": [
+        [
+          {
+            "node": "Write Analyse Args",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Analyse Args": {
       "main": [
         [
           {
