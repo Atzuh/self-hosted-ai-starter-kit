@@ -404,7 +404,9 @@
             }
           ]
         },
-        "options": {}
+        "options": {
+          "fallbackOutput": 1
+        }
       },
       "id": "c0a1b2c3-0009-4f00-aaaa-a663f6aa0028",
       "name": "Analyse Route",
@@ -686,7 +688,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Bouwt de webhook-respons voor mode='akte' (geen juridische analyse).\nconst akteNode = $('Generate DOCX').first()?.json || {};\nconst akteStdout = String(akteNode.stdout || '');\nconst akteMatch = akteStdout.match(/SUCCESS:\\s*(.+)/);\nconst aktePath = akteMatch ? akteMatch[1].trim() : '';\nif (!aktePath) {\n  throw new Error(`Geen SUCCESS pad gevonden in akte-output: ${akteStdout}`);\n}\nconst akteFilename = aktePath.split('/').pop();\n\nconst placeholdersNode = $('Build Placeholders').first()?.json || {};\n\nreturn [{\n  json: {\n    success: true,\n    mode: 'akte',\n    filename: akteFilename,\n    file_path: aktePath,\n    download_url: `http://localhost:8080/output/${akteFilename}`,\n    bank_id: placeholdersNode.bankId || null,\n    bank_display_name: placeholdersNode.bankDisplayName || null,\n    klant_samenvatting: placeholdersNode.klantSamenvatting || '',\n    zaaknummer: placeholdersNode.zaaknummer || '',\n    analysis: null\n  }\n}];"
+        "jsCode": "// Bouwt de webhook-respons voor mode='akte' (geen juridische analyse).\n// Ook gebruikt als fallback voor onbekende mode-waarden uit Analyse Route\n// (zie options.fallbackOutput): in dat geval bevat de respons een 'warning'.\nconst akteNode = $('Generate DOCX').first()?.json || {};\nconst akteStdout = String(akteNode.stdout || '');\nconst akteMatch = akteStdout.match(/SUCCESS:\\s*(.+)/);\nconst aktePath = akteMatch ? akteMatch[1].trim() : '';\nif (!aktePath) {\n  throw new Error(`Geen SUCCESS pad gevonden in akte-output: ${akteStdout}`);\n}\nconst akteFilename = aktePath.split('/').pop();\n\nconst placeholdersNode = $('Build Placeholders').first()?.json || {};\nconst inputMode = String($('Split Input Files').first()?.json?.mode || '').trim();\nconst KNOWN = new Set(['akte', 'beide', 'analyse']);\nconst warning = KNOWN.has(inputMode)\n  ? null\n  : `Onbekende mode '${inputMode || '(leeg)'}' ontvangen op de webhook; verwerkt als 'akte'. Toegestane waarden: akte, beide, analyse.`;\n\nreturn [{\n  json: {\n    success: true,\n    mode: 'akte',\n    warning,\n    filename: akteFilename,\n    file_path: aktePath,\n    download_url: `http://localhost:8080/output/${akteFilename}`,\n    bank_id: placeholdersNode.bankId || null,\n    bank_display_name: placeholdersNode.bankDisplayName || null,\n    klant_samenvatting: placeholdersNode.klantSamenvatting || '',\n    zaaknummer: placeholdersNode.zaaknummer || '',\n    analysis: null\n  }\n}];"
       },
       "id": "c0a1b2c3-0010-4f00-aaaa-a663f6aa0029",
       "name": "Build Response (akte only)",
