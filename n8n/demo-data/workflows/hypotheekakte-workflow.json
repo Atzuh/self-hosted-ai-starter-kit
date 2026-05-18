@@ -470,6 +470,38 @@
       ]
     },
     {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "e2f3a4b5-0005-cond-vererving",
+              "leftValue": "={{ $json.signal_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e2f3a4b5-0005-4f00-aaaa-a663f6aa0054",
+      "name": "Vererving Has Signals?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2495,
+        100
+      ]
+    },
+    {
       "parameters": {},
       "id": "e2f3a4b5-0002-4f00-aaaa-a663f6aa0051",
       "name": "Vererving LLM Chain",
@@ -531,6 +563,38 @@
       ]
     },
     {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "f3a4b5c6-0005-cond-lasten",
+              "leftValue": "={{ $json.signal_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f3a4b5c6-0005-4f00-aaaa-a663f6aa0064",
+      "name": "Lasten Has Signals?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3245,
+        100
+      ]
+    },
+    {
       "parameters": {},
       "id": "f3a4b5c6-0002-4f00-aaaa-a663f6aa0061",
       "name": "Lasten LLM Chain",
@@ -588,6 +652,38 @@
       "typeVersion": 2,
       "position": [
         3870,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "a4b5c6d7-0005-cond-burg",
+              "leftValue": "={{ $json.signal_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a4b5c6d7-0005-4f00-aaaa-a663f6aa0074",
+      "name": "Burgerlijke Has Signals?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3995,
         100
       ]
     },
@@ -777,6 +873,38 @@
       "typeVersion": 2,
       "position": [
         1120,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "b5c6d7e8-0005-cond-burganalyse",
+              "leftValue": "={{ $json.signal_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b5c6d7e8-0005-4f00-aaaa-a663f6aa0094",
+      "name": "Burgerlijke Analyse Has Signals?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1245,
         -200
       ]
     },
@@ -1101,7 +1229,25 @@
       "main": [
         [
           {
+            "node": "Vererving Has Signals?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vererving Has Signals?": {
+      "main": [
+        [
+          {
             "node": "Vererving LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Vererving JSON",
             "type": "main",
             "index": 0
           }
@@ -1145,7 +1291,25 @@
       "main": [
         [
           {
+            "node": "Lasten Has Signals?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lasten Has Signals?": {
+      "main": [
+        [
+          {
             "node": "Lasten LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Lasten JSON",
             "type": "main",
             "index": 0
           }
@@ -1189,7 +1353,25 @@
       "main": [
         [
           {
+            "node": "Burgerlijke Has Signals?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Burgerlijke Has Signals?": {
+      "main": [
+        [
+          {
             "node": "Burgerlijke LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Burgerlijke JSON",
             "type": "main",
             "index": 0
           }
@@ -1332,7 +1514,25 @@
       "main": [
         [
           {
+            "node": "Burgerlijke Analyse Has Signals?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Burgerlijke Analyse Has Signals?": {
+      "main": [
+        [
+          {
             "node": "Burgerlijke Analyse LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Burgerlijke Analyse JSON",
             "type": "main",
             "index": 0
           }
