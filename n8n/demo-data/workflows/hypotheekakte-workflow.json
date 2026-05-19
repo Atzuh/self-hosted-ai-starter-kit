@@ -199,7 +199,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parseert de juridische analyse JSON die de LLM teruggeeft (analyse-only-flow).\n// Identieke logica als de 'beide'-flow, hier gedupliceerd om de routing\n// eenvoudig te houden.\nfunction extractText(j) {\n  if (!j || typeof j !== 'object') return '';\n  if (typeof j.text === 'string' && j.text) return j.text;\n  if (typeof j.output === 'string' && j.output) return j.output;\n  if (typeof j.answer === 'string' && j.answer) return j.answer;\n  if (typeof j.response === 'string' && j.response) return j.response;\n  if (typeof j?.message?.content === 'string' && j.message.content) return j.message.content;\n  return '';\n}\nfunction unwrapJsonLike(s) {\n  let t = String(s || '').trim();\n  const fence = /^```(?:json)?\\s*\\r?\\n?([\\s\\S]*?)\\r?\\n?```$/im;\n  const m = t.match(fence);\n  if (m) return m[1].trim();\n  if (t.startsWith('```')) {\n    t = t.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/i, '');\n  }\n  return t.trim();\n}\nfunction parseAnalysis(jsonNode) {\n  const raw = extractText(jsonNode).trim();\n  if (raw) {\n    try { const _p = JSON.parse(unwrapJsonLike(raw)); if (!Array.isArray(_p)) return _p; } catch {}\n    const m = raw.match(/\\{[\\s\\S]*\\}/);\n    if (m) {\n      try { return JSON.parse(m[0]); } catch {}\n    }\n  }\n  const META = new Set(['pairedItem', 'sourceData', '$node']);\n  const obj = {};\n  for (const k of Object.keys(jsonNode || {})) {\n    if (!META.has(k) && !k.startsWith('_')) obj[k] = jsonNode[k];\n  }\n  if ('aandachtspunten' in obj || 'samenvatting' in obj) return obj;\n  return null;\n}\n\nconst all = $input.all();\nconst node = all[0]?.json || {};\nlet parsed = parseAnalysis(node);\n\nif (!parsed || typeof parsed !== 'object') {\n  parsed = { samenvatting: '', aandachtspunten: [] };\n}\n\nconst WRAPPER_KEYS = new Set(['analyse', 'analysis', 'data', 'response', 'result', 'output']);\nlet depth = 0;\nwhile (\n  parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&\n  Object.keys(parsed).length === 1 &&\n  WRAPPER_KEYS.has(Object.keys(parsed)[0]) && depth < 3\n) {\n  parsed = parsed[Object.keys(parsed)[0]];\n  depth++;\n}\n\nconst aandacht = Array.isArray(parsed.aandachtspunten) ? parsed.aandachtspunten : [];\nconst ALLOWED = new Set(['kritiek', 'aandacht', 'info']);\nconst ALIASES = { critical: 'kritiek', blokkerend: 'kritiek', warning: 'aandacht', warn: 'aandacht', notice: 'info', informatief: 'info' };\nconst normalised = aandacht.map((ap, i) => {\n  const e = String(ap?.ernst || '').trim().toLowerCase();\n  const ernst = ALLOWED.has(e) ? e : (ALIASES[e] || 'info');\n  return {\n    id: String(ap?.id || `punt-${i + 1}`),\n    ernst,\n    categorie: String(ap?.categorie || 'Overig'),\n    titel: String(ap?.titel || '').slice(0, 160),\n    constatering: String(ap?.constatering || ''),\n    juridisch_kader: String(ap?.juridisch_kader || ''),\n    actie: String(ap?.actie || ''),\n    bronnen: Array.isArray(ap?.bronnen) ? ap.bronnen.map(String) : []\n  };\n});\nconst ORDER = { kritiek: 0, aandacht: 1, info: 2 };\nnormalised.sort((a, b) => (ORDER[a.ernst] ?? 9) - (ORDER[b.ernst] ?? 9));\n\nconst samenvatting = String(parsed.samenvatting || '').trim();\n\n// Merge burgerlijke-specialist-bevindingen.\n// Parse Burgerlijke Analyse JSON is een directe voorouder (via Build Flex\n// Analysis Prompt) — $() is hier betrouwbaar.\nlet burgerlijkeItems = [];\ntry {\n  const bNode = $('Parse Burgerlijke Analyse JSON').first()?.json;\n  if (Array.isArray(bNode?.burgerlijke_aandachtspunten)) {\n    burgerlijkeItems = bNode.burgerlijke_aandachtspunten;\n  }\n} catch (e) {\n  // Log voor debuggen — nooit silent falen op kritieke merge\n  console.error('[Parse Flex Analysis JSON] burgerlijke merge fout:', e?.message);\n}\n\nconst heeftSpecialist = burgerlijkeItems.length > 0;\nconst filteredNorm = heeftSpecialist\n  ? normalised.filter(ap => String(ap?.categorie || '').toLowerCase() !== 'burgerlijke staat')\n  : normalised;\n\nconst seenM = new Set();\nconst merged = [];\nfor (const ap of [...burgerlijkeItems, ...filteredNorm]) {\n  const id = String(ap?.id || '').trim();\n  if (id && seenM.has(id)) continue;\n  if (id) seenM.add(id);\n  merged.push(ap);\n}\nconst ORDER_M = { kritiek: 0, aandacht: 1, info: 2 };\nmerged.sort((a, b) => (ORDER_M[a.ernst] ?? 9) - (ORDER_M[b.ernst] ?? 9));\n\nreturn [{\n  json: {\n    analysis: {\n      samenvatting,\n      aandachtspunten: merged\n    },\n    counts: {\n      kritiek: merged.filter((x) => x.ernst === 'kritiek').length,\n      aandacht: merged.filter((x) => x.ernst === 'aandacht').length,\n      info: merged.filter((x) => x.ernst === 'info').length,\n      totaal: merged.length\n    }\n  }\n}];"
+        "jsCode": "// Parseert de juridische analyse JSON die de LLM teruggeeft (analyse-only-flow).\n// Identieke logica als de 'beide'-flow Parse Analysis JSON: mega-prompt output\n// wordt gecombineerd met specialist-bevindingen (Vererving, Lasten,\n// Burgerlijke). Specialist-bevindingen krijgen voorrang in hun eigen\n// categorie; mega-prompt mag alleen in een specialist-categorie blijven als\n// die specialist niets gevonden heeft.\nfunction extractText(j) {\n  if (!j || typeof j !== 'object') return '';\n  if (typeof j.text === 'string' && j.text) return j.text;\n  if (typeof j.output === 'string' && j.output) return j.output;\n  if (typeof j.answer === 'string' && j.answer) return j.answer;\n  if (typeof j.response === 'string' && j.response) return j.response;\n  if (typeof j?.message?.content === 'string' && j.message.content) return j.message.content;\n  return '';\n}\nfunction unwrapJsonLike(s) {\n  let t = String(s || '').trim();\n  const fence = /^```(?:json)?\\s*\\r?\\n?([\\s\\S]*?)\\r?\\n?```$/im;\n  const m = t.match(fence);\n  if (m) return m[1].trim();\n  if (t.startsWith('```')) {\n    t = t.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/i, '');\n  }\n  return t.trim();\n}\nfunction parseAnalysis(jsonNode) {\n  const raw = extractText(jsonNode).trim();\n  if (raw) {\n    try { const _p = JSON.parse(unwrapJsonLike(raw)); if (!Array.isArray(_p)) return _p; } catch {}\n    const m = raw.match(/\\{[\\s\\S]*\\}/);\n    if (m) {\n      try { return JSON.parse(m[0]); } catch {}\n    }\n  }\n  const META = new Set(['pairedItem', 'sourceData', '$node']);\n  const obj = {};\n  for (const k of Object.keys(jsonNode || {})) {\n    if (!META.has(k) && !k.startsWith('_')) obj[k] = jsonNode[k];\n  }\n  if ('aandachtspunten' in obj || 'samenvatting' in obj) return obj;\n  return null;\n}\n\nconst all = $input.all();\nconst node = all[0]?.json || {};\nlet parsed = parseAnalysis(node);\n\nif (!parsed || typeof parsed !== 'object') {\n  parsed = { samenvatting: '', aandachtspunten: [] };\n}\n\nconst WRAPPER_KEYS = new Set(['analyse', 'analysis', 'data', 'response', 'result', 'output']);\nlet depth = 0;\nwhile (\n  parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&\n  Object.keys(parsed).length === 1 &&\n  WRAPPER_KEYS.has(Object.keys(parsed)[0]) && depth < 3\n) {\n  parsed = parsed[Object.keys(parsed)[0]];\n  depth++;\n}\n\nconst aandacht = Array.isArray(parsed.aandachtspunten) ? parsed.aandachtspunten : [];\nconst ALLOWED = new Set(['kritiek', 'aandacht', 'info']);\nconst ALIASES = { critical: 'kritiek', blokkerend: 'kritiek', warning: 'aandacht', warn: 'aandacht', notice: 'info', informatief: 'info' };\nconst normalised = aandacht.map((ap, i) => {\n  const e = String(ap?.ernst || '').trim().toLowerCase();\n  const ernst = ALLOWED.has(e) ? e : (ALIASES[e] || 'info');\n  return {\n    id: String(ap?.id || `punt-${i + 1}`),\n    ernst,\n    categorie: String(ap?.categorie || 'Overig'),\n    titel: String(ap?.titel || '').slice(0, 160),\n    constatering: String(ap?.constatering || ''),\n    juridisch_kader: String(ap?.juridisch_kader || ''),\n    actie: String(ap?.actie || ''),\n    bronnen: Array.isArray(ap?.bronnen) ? ap.bronnen.map(String) : []\n  };\n});\n\nconst samenvatting = String(parsed.samenvatting || '').trim();\n\n// Haal de drie specialist-bevindingen op (Parse * Analyse JSON zit elk in\n// de directe voorouder-chain, dus $() is hier betrouwbaar).\nlet verervingItems = [];\nlet lastenItems = [];\nlet burgerlijkeItems = [];\ntry {\n  const v = $('Parse Vererving Analyse JSON').first()?.json;\n  if (Array.isArray(v?.vererving_aandachtspunten)) verervingItems = v.vererving_aandachtspunten;\n} catch (e) { console.error('[Parse Flex Analysis JSON] vererving merge:', e?.message); }\ntry {\n  const l = $('Parse Lasten Analyse JSON').first()?.json;\n  if (Array.isArray(l?.lasten_aandachtspunten)) lastenItems = l.lasten_aandachtspunten;\n} catch (e) { console.error('[Parse Flex Analysis JSON] lasten merge:', e?.message); }\ntry {\n  const b = $('Parse Burgerlijke Analyse JSON').first()?.json;\n  if (Array.isArray(b?.burgerlijke_aandachtspunten)) burgerlijkeItems = b.burgerlijke_aandachtspunten;\n} catch (e) { console.error('[Parse Flex Analysis JSON] burgerlijke merge:', e?.message); }\n\n// Filter mega-prompt items in de drie specialist-categorieën. Specialist\n// heeft voorrang; alleen als de specialist 0 items teruggaf mag mega-prompt\n// die categorie nog vullen.\nconst RESERVED = {\n  'vererving': verervingItems,\n  'lasten en beperkingen': lastenItems,\n  'burgerlijke staat': burgerlijkeItems,\n};\nconst filteredNorm = normalised.filter((ap) => {\n  const cat = String(ap?.categorie || '').toLowerCase();\n  const owner = RESERVED[cat];\n  if (!owner) return true;\n  return owner.length === 0;\n});\n\nconst seenM = new Set();\nconst merged = [];\nfor (const ap of [...verervingItems, ...lastenItems, ...burgerlijkeItems, ...filteredNorm]) {\n  const id = String(ap?.id || '').trim();\n  if (id && seenM.has(id)) continue;\n  if (id) seenM.add(id);\n  merged.push(ap);\n}\nconst ORDER_M = { kritiek: 0, aandacht: 1, info: 2 };\nmerged.sort((a, b) => (ORDER_M[a.ernst] ?? 9) - (ORDER_M[b.ernst] ?? 9));\n\nreturn [{\n  json: {\n    analysis: {\n      samenvatting,\n      aandachtspunten: merged\n    },\n    counts: {\n      kritiek: merged.filter((x) => x.ernst === 'kritiek').length,\n      aandacht: merged.filter((x) => x.ernst === 'aandacht').length,\n      info: merged.filter((x) => x.ernst === 'info').length,\n      totaal: merged.length,\n      specialisten: {\n        vererving: verervingItems.length,\n        lasten: lastenItems.length,\n        burgerlijke: burgerlijkeItems.length\n      }\n    }\n  }\n}];\n"
       },
       "id": "c0a1b2c3-0006-4f00-aaaa-a663f6aa0025",
       "name": "Parse Flex Analysis JSON",
@@ -959,6 +959,194 @@
         1620,
         -200
       ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vererving-specialist in analyse-only-flow.\n// Combineert alle Docling-markdowns en past dezelfde vererving-regex toe\n// als de 'beide'-flow specialist (Build Vererving Prompt).\nconst fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\n\nconst aggItem = $('Aggregate Markdowns').first()?.json || {};\nconst docs = Array.isArray(aggItem.docs) ? aggItem.docs : [];\n\nlet registry;\ntry {\n  registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));\n} catch (err) {\n  throw new Error(`Kon templates-registry niet lezen (${REGISTRY_PATH}): ${err.message}`);\n}\n\nconst tmpl = String(registry.legal_specialist_prompts?.vererving || '');\nif (!tmpl) {\n  throw new Error('registry.json mist legal_specialist_prompts.vererving.');\n}\n\nfunction clamp(s, max) {\n  const txt = String(s || '');\n  if (txt.length <= max) return txt;\n  return txt.slice(0, max) + '\\n…[afgekapt voor vererving-analyse-prompt]';\n}\n\nconst limits = (registry.context_limits || {});\nconst MAX_MD = Number(limits.specialist_vererving) || 14000;\n\nconst allMdFull = docs.map((d, i) => {\n  const label = d.docType === 'bank' ? 'Bank-passeeropdracht'\n    : d.docType === 'kadaster' ? 'Kadaster eigendomsinformatie'\n    : 'Overig dossier-stuk';\n  return `=== DOCUMENT ${i + 1} — ${label} — ${d.filename || `document_${i + 1}`} ===\\n${d.markdown || ''}`;\n}).join('\\n\\n');\nconst combinedMd = clamp(allMdFull, MAX_MD);\n\nconst PATTERNS = [\n  /(?:^|\\b)overled(?:en|\\.)/i,\n  /†/,\n  /verklaring\\s+van\\s+erfrecht/i,\n  /akte\\s+van\\s+verdeling/i,\n  /\\b(?:weduwe|weduwnaar)\\b/i,\n  /onverdeelde\\s+nalatenschap/i,\n  /(?:sterfdatum|datum\\s+van\\s+overlijden)/i,\n  /wettelijke\\s+verdeling/i,\n  /(?:saisine|art\\.?\\s*4:182)/i,\n];\n\nconst hits = [];\nfor (const re of PATTERNS) {\n  const m = allMdFull.match(re);\n  if (m) hits.push(m[0]);\n}\nconst signalCount = hits.length;\n\nlet chatInput;\nif (signalCount > 0) {\n  chatInput = tmpl.split('{{kadaster_markdown}}').join(combinedMd);\n} else {\n  chatInput = 'De aangeleverde stukken bevatten geen duidelijke signalen van vererving, overlijden, verklaring van erfrecht of een onverdeelde nalatenschap. Geef ALLEEN deze JSON terug, niets anders:\\n{\"aandachtspunten\": []}';\n}\n\nreturn [{\n  json: {\n    chatInput,\n    signal_count: signalCount,\n    signal_hits: hits.slice(0, 5),\n    docs,\n    zaaknummer: aggItem.zaaknummer || '',\n    bankDisplayName: aggItem.bankDisplayName || '',\n    klantSamenvatting: aggItem.klantSamenvatting || ''\n  }\n}];\n"
+      },
+      "id": "c1d2e3f4-0001-4f00-bbbb-a663f6aa0100",
+      "name": "Build Vererving Analyse Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        -380
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1d2e3f4-cond-vererving-analyse",
+              "leftValue": "={{ $json.signal_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c1d2e3f4-0002-4f00-bbbb-a663f6aa0101",
+      "name": "Vererving Analyse Has Signals?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1245,
+        -380
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "c1d2e3f4-0003-4f00-bbbb-a663f6aa0102",
+      "name": "Vererving Analyse LLM Chain",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1370,
+        -380
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": "qwen2.5:7b",
+        "options": {
+          "temperature": 0,
+          "format": "json",
+          "keep_alive": "30m"
+        }
+      },
+      "id": "c1d2e3f4-0004-4f00-bbbb-a663f6aa0103",
+      "name": "Vererving Analyse Ollama Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        1370,
+        -560
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "xHuYe0MDGOs9IpBW",
+          "name": "Local Ollama service"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parseert de output van de Vererving-specialist in analyse-only-flow.\n// Forceert categorie='Vererving' en bronnen=['kadaster'].\nfunction extractText(j) {\n  if (!j || typeof j !== 'object') return '';\n  if (typeof j.text === 'string' && j.text) return j.text;\n  if (typeof j.output === 'string' && j.output) return j.output;\n  if (typeof j.answer === 'string' && j.answer) return j.answer;\n  if (typeof j.response === 'string' && j.response) return j.response;\n  if (typeof j?.message?.content === 'string' && j.message.content) return j.message.content;\n  return '';\n}\nfunction unwrapJsonLike(s) {\n  let t = String(s || '').trim();\n  const fence = /^```(?:json)?\\s*\\r?\\n?([\\s\\S]*?)\\r?\\n?```$/im;\n  const m = t.match(fence);\n  if (m) return m[1].trim();\n  if (t.startsWith('```')) {\n    t = t.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/i, '');\n  }\n  return t.trim();\n}\nfunction parseSpec(node) {\n  const raw = extractText(node).trim();\n  if (raw) {\n    try { return JSON.parse(unwrapJsonLike(raw)); } catch {}\n    const m = raw.match(/\\{[\\s\\S]*\\}/);\n    if (m) { try { return JSON.parse(m[0]); } catch {} }\n  }\n  const META = new Set(['pairedItem', 'sourceData', '$node']);\n  const obj = {};\n  for (const k of Object.keys(node || {})) {\n    if (!META.has(k) && !k.startsWith('_')) obj[k] = node[k];\n  }\n  return obj;\n}\n\nconst all = $input.all();\nconst node = all[0]?.json || {};\n\nlet signalCount = -1;\ntry {\n  const meta = $('Build Vererving Analyse Prompt').first()?.json;\n  if (typeof meta?.signal_count === 'number') signalCount = meta.signal_count;\n} catch (_) {}\n\nlet aggForward = {};\ntry {\n  aggForward = $('Build Vererving Analyse Prompt').first()?.json || {};\n} catch (_) {}\n\nif (signalCount === 0) {\n  return [{ json: {\n    vererving_aandachtspunten: [],\n    signal_count: 0,\n    docs: Array.isArray(aggForward.docs) ? aggForward.docs : [],\n    zaaknummer: aggForward.zaaknummer || '',\n    bankDisplayName: aggForward.bankDisplayName || '',\n    klantSamenvatting: aggForward.klantSamenvatting || ''\n  }}];\n}\n\nlet parsed = parseSpec(node);\nif (!parsed || typeof parsed !== 'object') parsed = { aandachtspunten: [] };\n\nconst WRAPPER_KEYS = new Set(['analyse', 'analysis', 'data', 'response', 'result', 'output', 'vererving']);\nlet depth = 0;\nwhile (\n  parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&\n  Object.keys(parsed).length === 1 &&\n  WRAPPER_KEYS.has(Object.keys(parsed)[0]) && depth < 3\n) {\n  parsed = parsed[Object.keys(parsed)[0]];\n  depth++;\n}\n\nconst aandacht = Array.isArray(parsed.aandachtspunten) ? parsed.aandachtspunten : [];\nconst MAX_ITEMS = 4;\nconst ALLOWED = new Set(['kritiek', 'aandacht', 'info']);\nconst ALIASES = { critical: 'kritiek', blokkerend: 'kritiek', warning: 'aandacht', warn: 'aandacht', notice: 'info', informatief: 'info' };\nconst normalised = aandacht.slice(0, MAX_ITEMS).map((ap, i) => {\n  const e = String(ap?.ernst || '').trim().toLowerCase();\n  const ernst = ALLOWED.has(e) ? e : (ALIASES[e] || 'aandacht');\n  const idRaw = String(ap?.id || '').trim();\n  const id = idRaw\n    ? (idRaw.startsWith('vererving-') ? idRaw : `vererving-${idRaw}`)\n    : `vererving-${i + 1}`;\n  return {\n    id,\n    ernst,\n    categorie: 'Vererving',\n    titel: String(ap?.titel || '').slice(0, 160),\n    constatering: String(ap?.constatering || ''),\n    juridisch_kader: String(ap?.juridisch_kader || ''),\n    actie: String(ap?.actie || ''),\n    bronnen: ['kadaster']\n  };\n});\n\nreturn [{ json: {\n  vererving_aandachtspunten: normalised,\n  signal_count: signalCount,\n  docs: Array.isArray(aggForward.docs) ? aggForward.docs : [],\n  zaaknummer: aggForward.zaaknummer || '',\n  bankDisplayName: aggForward.bankDisplayName || '',\n  klantSamenvatting: aggForward.klantSamenvatting || ''\n}}];\n"
+      },
+      "id": "c1d2e3f4-0005-4f00-bbbb-a663f6aa0104",
+      "name": "Parse Vererving Analyse JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1620,
+        -380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lasten-specialist in analyse-only-flow.\n// Combineert alle Docling-markdowns en past dezelfde lasten/beperkingen-regex\n// toe als de 'beide'-flow specialist (Build Lasten Prompt).\nconst fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\n\nconst aggItem = $('Aggregate Markdowns').first()?.json || {};\nconst docs = Array.isArray(aggItem.docs) ? aggItem.docs : [];\n\nlet registry;\ntry {\n  registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));\n} catch (err) {\n  throw new Error(`Kon templates-registry niet lezen (${REGISTRY_PATH}): ${err.message}`);\n}\n\nconst tmpl = String(registry.legal_specialist_prompts?.lasten || '');\nif (!tmpl) {\n  throw new Error('registry.json mist legal_specialist_prompts.lasten.');\n}\n\nfunction clamp(s, max) {\n  const txt = String(s || '');\n  if (txt.length <= max) return txt;\n  return txt.slice(0, max) + '\\n…[afgekapt voor lasten-analyse-prompt]';\n}\n\nconst limits = (registry.context_limits || {});\nconst MAX_MD = Number(limits.specialist_lasten) || 14000;\n\nconst allMdFull = docs.map((d, i) => {\n  const label = d.docType === 'bank' ? 'Bank-passeeropdracht'\n    : d.docType === 'kadaster' ? 'Kadaster eigendomsinformatie'\n    : 'Overig dossier-stuk';\n  return `=== DOCUMENT ${i + 1} — ${label} — ${d.filename || `document_${i + 1}`} ===\\n${d.markdown || ''}`;\n}).join('\\n\\n');\nconst combinedMd = clamp(allMdFull, MAX_MD);\n\nconst PATTERNS = [\n  /\\bbeslag(?:legger|gen|en)?\\b/i,\n  /(?:executoriaal|conservatoir)\\s+beslag/i,\n  /\\berfpacht/i,\n  /\\bopstalrecht\\b/i,\n  /recht\\s+van\\s+opstal/i,\n  /\\bvruchtgebruik/i,\n  /\\bhuurbeding\\b/i,\n  /\\bkettingbeding\\b/i,\n  /kwalitatieve\\s+verplichting/i,\n  /wet\\s+voorkeursrecht/i,\n  /\\bWvg\\b/,\n  /\\bvoorkeursrecht\\b/i,\n  /\\bexploitatiebijdrage\\b/i,\n  /\\bbaatbelasting\\b/i,\n  /\\bwegenfonds\\b/i,\n];\n\nconst hits = [];\nfor (const re of PATTERNS) {\n  const m = allMdFull.match(re);\n  if (m) hits.push(m[0]);\n}\nconst signalCount = hits.length;\n\nlet chatInput;\nif (signalCount > 0) {\n  chatInput = tmpl.split('{{kadaster_markdown}}').join(combinedMd);\n} else {\n  chatInput = 'De aangeleverde stukken bevatten geen indicaties van beslagen, erfpacht, opstal, vruchtgebruik, huurbeding, kettingbeding, kwalitatieve verplichtingen of voorkeursrechten. Geef ALLEEN deze JSON terug, niets anders:\\n{\"aandachtspunten\": []}';\n}\n\nreturn [{\n  json: {\n    chatInput,\n    signal_count: signalCount,\n    signal_hits: hits.slice(0, 5),\n    docs,\n    zaaknummer: aggItem.zaaknummer || '',\n    bankDisplayName: aggItem.bankDisplayName || '',\n    klantSamenvatting: aggItem.klantSamenvatting || ''\n  }\n}];\n"
+      },
+      "id": "d2e3f4a5-0001-4f00-bbbb-a663f6aa0110",
+      "name": "Build Lasten Analyse Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1870,
+        -380
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "d2e3f4a5-cond-lasten-analyse",
+              "leftValue": "={{ $json.signal_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d2e3f4a5-0002-4f00-bbbb-a663f6aa0111",
+      "name": "Lasten Analyse Has Signals?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1995,
+        -380
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d2e3f4a5-0003-4f00-bbbb-a663f6aa0112",
+      "name": "Lasten Analyse LLM Chain",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        2120,
+        -380
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": "qwen2.5:7b",
+        "options": {
+          "temperature": 0,
+          "format": "json",
+          "keep_alive": "30m"
+        }
+      },
+      "id": "d2e3f4a5-0004-4f00-bbbb-a663f6aa0113",
+      "name": "Lasten Analyse Ollama Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        2120,
+        -560
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "xHuYe0MDGOs9IpBW",
+          "name": "Local Ollama service"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parseert de output van de Lasten-specialist in analyse-only-flow.\n// Forceert categorie='Lasten en beperkingen' en bronnen=['kadaster'].\nfunction extractText(j) {\n  if (!j || typeof j !== 'object') return '';\n  if (typeof j.text === 'string' && j.text) return j.text;\n  if (typeof j.output === 'string' && j.output) return j.output;\n  if (typeof j.answer === 'string' && j.answer) return j.answer;\n  if (typeof j.response === 'string' && j.response) return j.response;\n  if (typeof j?.message?.content === 'string' && j.message.content) return j.message.content;\n  return '';\n}\nfunction unwrapJsonLike(s) {\n  let t = String(s || '').trim();\n  const fence = /^```(?:json)?\\s*\\r?\\n?([\\s\\S]*?)\\r?\\n?```$/im;\n  const m = t.match(fence);\n  if (m) return m[1].trim();\n  if (t.startsWith('```')) {\n    t = t.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/i, '');\n  }\n  return t.trim();\n}\nfunction parseSpec(node) {\n  const raw = extractText(node).trim();\n  if (raw) {\n    try { return JSON.parse(unwrapJsonLike(raw)); } catch {}\n    const m = raw.match(/\\{[\\s\\S]*\\}/);\n    if (m) { try { return JSON.parse(m[0]); } catch {} }\n  }\n  const META = new Set(['pairedItem', 'sourceData', '$node']);\n  const obj = {};\n  for (const k of Object.keys(node || {})) {\n    if (!META.has(k) && !k.startsWith('_')) obj[k] = node[k];\n  }\n  return obj;\n}\n\nconst all = $input.all();\nconst node = all[0]?.json || {};\n\nlet signalCount = -1;\ntry {\n  const meta = $('Build Lasten Analyse Prompt').first()?.json;\n  if (typeof meta?.signal_count === 'number') signalCount = meta.signal_count;\n} catch (_) {}\n\nlet aggForward = {};\ntry {\n  aggForward = $('Build Lasten Analyse Prompt').first()?.json || {};\n} catch (_) {}\n\nif (signalCount === 0) {\n  return [{ json: {\n    lasten_aandachtspunten: [],\n    signal_count: 0,\n    docs: Array.isArray(aggForward.docs) ? aggForward.docs : [],\n    zaaknummer: aggForward.zaaknummer || '',\n    bankDisplayName: aggForward.bankDisplayName || '',\n    klantSamenvatting: aggForward.klantSamenvatting || ''\n  }}];\n}\n\nlet parsed = parseSpec(node);\nif (!parsed || typeof parsed !== 'object') parsed = { aandachtspunten: [] };\n\nconst WRAPPER_KEYS = new Set(['analyse', 'analysis', 'data', 'response', 'result', 'output', 'lasten']);\nlet depth = 0;\nwhile (\n  parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&\n  Object.keys(parsed).length === 1 &&\n  WRAPPER_KEYS.has(Object.keys(parsed)[0]) && depth < 3\n) {\n  parsed = parsed[Object.keys(parsed)[0]];\n  depth++;\n}\n\nconst aandacht = Array.isArray(parsed.aandachtspunten) ? parsed.aandachtspunten : [];\nconst MAX_ITEMS = 5;\nconst ALLOWED = new Set(['kritiek', 'aandacht', 'info']);\nconst ALIASES = { critical: 'kritiek', blokkerend: 'kritiek', warning: 'aandacht', warn: 'aandacht', notice: 'info', informatief: 'info' };\nconst normalised = aandacht.slice(0, MAX_ITEMS).map((ap, i) => {\n  const e = String(ap?.ernst || '').trim().toLowerCase();\n  const ernst = ALLOWED.has(e) ? e : (ALIASES[e] || 'aandacht');\n  const idRaw = String(ap?.id || '').trim();\n  const id = idRaw\n    ? (idRaw.startsWith('lasten-') ? idRaw : `lasten-${idRaw}`)\n    : `lasten-${i + 1}`;\n  return {\n    id,\n    ernst,\n    categorie: 'Lasten en beperkingen',\n    titel: String(ap?.titel || '').slice(0, 160),\n    constatering: String(ap?.constatering || ''),\n    juridisch_kader: String(ap?.juridisch_kader || ''),\n    actie: String(ap?.actie || ''),\n    bronnen: ['kadaster']\n  };\n});\n\nreturn [{ json: {\n  lasten_aandachtspunten: normalised,\n  signal_count: signalCount,\n  docs: Array.isArray(aggForward.docs) ? aggForward.docs : [],\n  zaaknummer: aggForward.zaaknummer || '',\n  bankDisplayName: aggForward.bankDisplayName || '',\n  klantSamenvatting: aggForward.klantSamenvatting || ''\n}}];\n"
+      },
+      "id": "d2e3f4a5-0005-4f00-bbbb-a663f6aa0114",
+      "name": "Parse Lasten Analyse JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2370,
+        -380
+      ]
     }
   ],
   "connections": {
@@ -1028,7 +1216,7 @@
       "main": [
         [
           {
-            "node": "Build Burgerlijke Analyse Prompt",
+            "node": "Build Vererving Analyse Prompt",
             "type": "main",
             "index": 0
           }
@@ -1570,6 +1758,130 @@
         [
           {
             "node": "Build Flex Analysis Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Vererving Analyse Prompt": {
+      "main": [
+        [
+          {
+            "node": "Vererving Analyse Has Signals?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vererving Analyse Has Signals?": {
+      "main": [
+        [
+          {
+            "node": "Vererving Analyse LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Vererving Analyse JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vererving Analyse LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Parse Vererving Analyse JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vererving Analyse Ollama Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Vererving Analyse LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Vererving Analyse JSON": {
+      "main": [
+        [
+          {
+            "node": "Build Lasten Analyse Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Lasten Analyse Prompt": {
+      "main": [
+        [
+          {
+            "node": "Lasten Analyse Has Signals?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lasten Analyse Has Signals?": {
+      "main": [
+        [
+          {
+            "node": "Lasten Analyse LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Lasten Analyse JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lasten Analyse LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Parse Lasten Analyse JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lasten Analyse Ollama Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Lasten Analyse LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Lasten Analyse JSON": {
+      "main": [
+        [
+          {
+            "node": "Build Burgerlijke Analyse Prompt",
             "type": "main",
             "index": 0
           }
