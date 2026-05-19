@@ -227,6 +227,53 @@ specialist hoeveel aandachtspunten ze toevoegden.
 
 ---
 
+### Extra-4 — Specialist-dedup: één chain die beide flows bedient
+
+In extra-3 maakten we voor de analyse-only flow een parallelle
+specialist-chain (Vererving / Lasten / Burgerlijke Analyse) naast
+de bestaande beide-flow specialists. Twee chains die functioneel
+identiek waren; alleen de input-shape verschilde (structured
+klanten-data in beide-mode vs. losse markdown in analyse-mode).
+
+**Oplossing.**
+- `Build Vererving / Lasten / Burgerlijke Prompt` detecteren nu
+  de mode via `Split Input Files` en lezen het juiste input-pad
+  (`Build Placeholders.analysisInput.kadaster_markdown` voor beide,
+  `Aggregate Markdowns.docs[]` voor analyse).
+- `Aggregate Markdowns` connect direct naar `Build Vererving Prompt`
+  (analyse-flow entry). Beide entries komen samen in de unified
+  chain.
+- Nieuwe `Specialist Route` Switch na `Parse Burgerlijke JSON`:
+  routeert op mode naar `Build Flex Analysis Prompt` (analyse) of
+  `Build Analysis Prompt` (beide).
+- 15 analyse-only specialist nodes verwijderd. `Parse Flex Analysis
+  JSON` cross-node refs gewijzigd naar unified `Parse * JSON`.
+
+Netto: 63 → 49 nodes (-14). E2E getest met mode=beide en
+mode=analyse: output-shape identiek aan voor de refactor.
+
+### Extra-5 — 3-lanes canvas-layout + sticky notes
+
+De canvas was na alle hardening onleesbaar geworden. De drie
+modes liepen visueel door elkaar, waardoor onderhoud moeilijk
+was. Puur cosmetisch, geen execution-impact.
+
+**Oplossing.** Alle 49 nodes herpositioneerd in horizontale
+banen:
+
+| y-band | Wat |
+|---|---|
+| 200 | Gedeelde entry + akte-generatie (mode=akte / beide) |
+| -100 | Gedeelde specialisten (mode=beide / analyse) |
+| -500 | Analyse-only entry + analyse-tail (mode=analyse) |
+| 500 | Beide-tail (juridische analyse bovenop akte) |
+
+7 sticky notes labelen de regio's met kleurcodes en uitleg per
+mode. Hierdoor is in de n8n-UI in één oogopslag duidelijk welke
+nodes bij welke flow horen.
+
+---
+
 ## Affected files
 
 ```
@@ -236,7 +283,15 @@ shared/genereer_juridische_analyse.py                  (P1.3)
 shared/templates/registry.json                         (P3)
 ```
 
-## Toegevoegde nodes (18)
+## Verwijderde nodes (15) — door extra-4 dedup
+
+Vererving Analyse / Lasten Analyse / Burgerlijke Analyse — voor
+elk: Build * Prompt, IF gate, LLM Chain, Ollama Model, Parse * JSON.
+Vervangen door de unified `Build * Prompt` (mode-aware) + één
+`Specialist Route` Switch die de output naar de juiste mode-tail
+stuurt.
+
+## Toegevoegde nodes (4 functioneel + 7 cosmetisch)
 
 | Node | Type | Taak |
 |---|---|---|
@@ -248,16 +303,8 @@ shared/templates/registry.json                         (P3)
 | Lasten Has Signals? | `n8n-nodes-base.if` | P2.1 |
 | Burgerlijke Has Signals? | `n8n-nodes-base.if` | P2.1 |
 | Burgerlijke Analyse Has Signals? | `n8n-nodes-base.if` | P2.1 |
-| Build Vererving Analyse Prompt | `n8n-nodes-base.code` | Extra-3 |
-| Vererving Analyse Has Signals? | `n8n-nodes-base.if` | Extra-3 |
-| Vererving Analyse LLM Chain | `@n8n/n8n-nodes-langchain.chainLlm` | Extra-3 |
-| Vererving Analyse Ollama Model | `@n8n/n8n-nodes-langchain.lmChatOllama` | Extra-3 |
-| Parse Vererving Analyse JSON | `n8n-nodes-base.code` | Extra-3 |
-| Build Lasten Analyse Prompt | `n8n-nodes-base.code` | Extra-3 |
-| Lasten Analyse Has Signals? | `n8n-nodes-base.if` | Extra-3 |
-| Lasten Analyse LLM Chain | `@n8n/n8n-nodes-langchain.chainLlm` | Extra-3 |
-| Lasten Analyse Ollama Model | `@n8n/n8n-nodes-langchain.lmChatOllama` | Extra-3 |
-| Parse Lasten Analyse JSON | `n8n-nodes-base.code` | Extra-3 |
+| Specialist Route | `n8n-nodes-base.switch` | Extra-4 |
+| 7 × Sticky Note | `n8n-nodes-base.stickyNote` | Extra-5 |
 
 ## N8n-instellingen waar deze branch op rekent
 

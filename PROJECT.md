@@ -585,6 +585,8 @@ Sinds branch `feature/workflow-hardening-poc` (zie `CHANGES.md` voor detail per 
 | `dossierExtraMarkdownByExec` global state in Collapse Dossier Markdowns → Build Placeholders | `dossier_markdown` lift mee als veld op de bank+kadaster-items via Build Extraction Prompt en Parse Ollama JSON, en wordt in Build Placeholders uit `bankDoc.dossier_markdown` gelezen. |
 | Generate DOCX retourneerde `REPLACED_BLOCKS: N` op stdout zonder dat de workflow er iets mee deed | `Build Response (akte only)` en `Build Response (akte+analyse)` parsen het getal; bij 0 een `template_warning`-veld in de respons + `replaced_blocks` voor debugging. |
 | Analyse-only flow had alleen Burgerlijke specialist | Toegevoegd: Vererving + Lasten Analyse specialists (5 nodes elk, zelfde patroon en regex-pre-filter als beide-flow). Chain: Aggregate Markdowns → Vererving → Lasten → Burgerlijke → Build Flex Analysis Prompt. Parse Flex Analysis JSON merged nu alle drie. |
+| Twee parallelle specialist-chains (beide-flow + analyse-flow) met functioneel identieke logica, alleen verschillende input-shape | Eén unified `Build * Prompt` per specialist detecteert mode via Split Input Files en kiest het juiste input-pad (analysisInput voor beide, Aggregate.docs[] voor analyse). Nieuwe `Specialist Route` Switch routeert na de drie specialisten naar `Build Flex Analysis Prompt` (analyse) of `Build Analysis Prompt` (beide). De 15 analyse-only specialist-nodes uit extra-3 zijn weer verwijderd; netto 63 → 49 nodes. |
+| Canvas was na alle hardening visueel onleesbaar | Alle nodes herpositioneerd in 4 y-banen (entry+akte 200, specialisten -100, analyse-only -500, beide-tail 500) met 7 sticky notes als labels. Puur cosmetisch, geen execution-impact. |
 
 ### Argumenten naar Python-scripts
 
