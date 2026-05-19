@@ -14,8 +14,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
-        -420,
-        280
+        -200,
+        200
       ],
       "webhookId": "hypotheekakte-webhook"
     },
@@ -28,8 +28,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -170,
-        280
+        -20,
+        200
       ]
     },
     {
@@ -55,8 +55,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        90,
-        280
+        160,
+        200
       ],
       "retryOnFail": true,
       "maxTries": 4,
@@ -72,8 +72,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        350,
-        280
+        340,
+        200
       ]
     },
     {
@@ -133,8 +133,8 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
       "position": [
-        620,
-        280
+        520,
+        200
       ]
     },
     {
@@ -146,8 +146,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        870,
-        80
+        700,
+        -500
       ]
     },
     {
@@ -159,8 +159,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1120,
-        80
+        4840,
+        -500
       ]
     },
     {
@@ -170,8 +170,8 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.7,
       "position": [
-        1370,
-        80
+        5020,
+        -500
       ]
     },
     {
@@ -187,8 +187,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
       "typeVersion": 1,
       "position": [
-        1370,
-        -160
+        5020,
+        -680
       ],
       "credentials": {
         "ollamaApi": {
@@ -206,8 +206,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1620,
-        80
+        5200,
+        -500
       ]
     },
     {
@@ -219,8 +219,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1745,
-        80
+        5380,
+        -500
       ]
     },
     {
@@ -232,8 +232,8 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        1935,
-        80
+        5560,
+        -500
       ]
     },
     {
@@ -245,8 +245,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2120,
-        80
+        5740,
+        -500
       ]
     },
     {
@@ -259,8 +259,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        870,
-        280
+        880,
+        200
       ]
     },
     {
@@ -270,8 +270,8 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.7,
       "position": [
-        1120,
-        280
+        1060,
+        200
       ]
     },
     {
@@ -287,8 +287,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
       "typeVersion": 1,
       "position": [
-        1120,
-        520
+        1060,
+        400
       ],
       "credentials": {
         "ollamaApi": {
@@ -307,8 +307,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1370,
-        280
+        1240,
+        200
       ]
     },
     {
@@ -323,8 +323,8 @@
       "type": "n8n-nodes-base.aggregate",
       "typeVersion": 1,
       "position": [
-        1495,
-        280
+        1420,
+        200
       ]
     },
     {
@@ -337,8 +337,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1620,
-        280
+        1600,
+        200
       ]
     },
     {
@@ -350,8 +350,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1745,
-        140
+        1780,
+        200
       ]
     },
     {
@@ -363,8 +363,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1810,
-        280
+        1960,
+        200
       ]
     },
     {
@@ -376,8 +376,8 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        1935,
-        280
+        2140,
+        200
       ]
     },
     {
@@ -439,8 +439,8 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
       "position": [
-        2120,
-        280
+        2320,
+        200
       ]
     },
     {
@@ -452,8 +452,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3370,
-        380
+        4840,
+        500
       ]
     },
     {
@@ -465,8 +465,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2370,
-        100
+        2500,
+        -100
       ]
     },
     {
@@ -497,8 +497,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        2495,
-        100
+        2680,
+        -100
       ]
     },
     {
@@ -508,8 +508,8 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.7,
       "position": [
-        2620,
-        100
+        2860,
+        -100
       ],
       "onError": "continueRegularOutput"
     },
@@ -527,8 +527,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
       "typeVersion": 1,
       "position": [
-        2620,
-        -140
+        2860,
+        -280
       ],
       "credentials": {
         "ollamaApi": {
@@ -546,8 +546,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2870,
-        100
+        3040,
+        -100
       ]
     },
     {
@@ -559,8 +559,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3120,
-        100
+        3220,
+        -100
       ]
     },
     {
@@ -591,8 +591,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        3245,
-        100
+        3400,
+        -100
       ]
     },
     {
@@ -602,8 +602,8 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.7,
       "position": [
-        3370,
-        100
+        3580,
+        -100
       ],
       "onError": "continueRegularOutput"
     },
@@ -621,8 +621,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
       "typeVersion": 1,
       "position": [
-        3370,
-        -140
+        3580,
+        -280
       ],
       "credentials": {
         "ollamaApi": {
@@ -640,8 +640,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3620,
-        100
+        3760,
+        -100
       ]
     },
     {
@@ -653,8 +653,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3870,
-        100
+        3940,
+        -100
       ]
     },
     {
@@ -685,8 +685,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        3995,
-        100
+        4120,
+        -100
       ]
     },
     {
@@ -696,8 +696,8 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.7,
       "position": [
-        4120,
-        100
+        4300,
+        -100
       ],
       "onError": "continueRegularOutput"
     },
@@ -715,8 +715,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
       "typeVersion": 1,
       "position": [
-        4120,
-        -140
+        4300,
+        -280
       ],
       "credentials": {
         "ollamaApi": {
@@ -734,8 +734,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4370,
-        100
+        4480,
+        -100
       ]
     },
     {
@@ -745,8 +745,8 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.7,
       "position": [
-        3620,
-        380
+        5020,
+        500
       ]
     },
     {
@@ -762,8 +762,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
       "typeVersion": 1,
       "position": [
-        3620,
-        620
+        5020,
+        680
       ],
       "credentials": {
         "ollamaApi": {
@@ -781,8 +781,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3870,
-        380
+        5200,
+        500
       ]
     },
     {
@@ -794,8 +794,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3995,
-        380
+        5380,
+        500
       ]
     },
     {
@@ -807,8 +807,8 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        4185,
-        380
+        5560,
+        500
       ]
     },
     {
@@ -820,8 +820,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4370,
-        380
+        5740,
+        500
       ]
     },
     {
@@ -833,8 +833,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2370,
-        180
+        2500,
+        400
       ]
     },
     {
@@ -848,8 +848,8 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.3,
       "position": [
-        4620,
-        280
+        5920,
+        0
       ]
     },
     {
@@ -862,8 +862,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        760,
-        280
+        700,
+        200
       ]
     },
     {
@@ -925,8 +925,120 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
       "position": [
-        4620,
-        100
+        4660,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 📥 GEDEELDE ENTRY\nElke `mode` (akte / beide / analyse) komt hier binnen. `Split Input Files` parsed de multipart-body en classificeert de bestanden; `Docling` zet PDFs om naar markdown; `Mode Route` splitst op `mode`.",
+        "height": 240,
+        "width": 970,
+        "color": 7
+      },
+      "id": "sticky-001",
+      "name": "Sticky: entry",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 📄 AKTE-GENERATIE — mode=akte & mode=beide\nBank- en kadaster-document extractie → JSON-merge → placeholder-mapping → deterministische checks → Python-DOCX-generator. Eindigt bij `Analyse Route`: mode=akte stopt hier, mode=beide gaat door naar specialisten.",
+        "height": 360,
+        "width": 1880,
+        "color": 5
+      },
+      "id": "sticky-002",
+      "name": "Sticky: akte",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        640,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 📦 ANALYSE-ENTRY\n`mode=analyse`: alle PDFs gaan ongeclassificeerd door naar de gedeelde specialisten en de juridische analyse.",
+        "height": 240,
+        "width": 240,
+        "color": 6
+      },
+      "id": "sticky-003",
+      "name": "Sticky: analyse-entry",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        640,
+        -620
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## ⚖️ GEDEELDE JURIDISCHE SPECIALISTEN — mode=beide & mode=analyse\nDrie specialist-chains (Vererving / Lasten / Burgerlijke) elk met een regex-voorfilter (`Has Signals?` IF), een gegate Ollama-call, en een parse-stap. Eén unified chain die zowel beide- als analyse-input ondersteunt; `Specialist Route` splitst de output terug naar de juiste mode-tail.",
+        "height": 380,
+        "width": 2400,
+        "color": 4
+      },
+      "id": "sticky-004",
+      "name": "Sticky: specialists",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2440,
+        -380
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 📑 mode=analyse — ANALYSE-OUTPUT\nFlex-analyse mega-prompt + Parse merged de drie specialist-bevindingen, genereert het analyse-DOCX en bouwt de webhook-respons (geen akte).",
+        "height": 320,
+        "width": 1140,
+        "color": 6
+      },
+      "id": "sticky-005",
+      "name": "Sticky: analyse-tail",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4780,
+        -620
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 📑 mode=beide — JURIDISCHE-ANALYSE-TAIL\nBovenop de akte (zie linker baan) draait hier de juridische analyse met deterministische checks + 3 specialisten + mega-prompt. Beide DOCX-paden komen samen in de webhook-respons.",
+        "height": 360,
+        "width": 1140,
+        "color": 3
+      },
+      "id": "sticky-006",
+      "name": "Sticky: beide-tail",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4780,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 📤 GEDEELDE EXIT\nEén `Respond to Webhook` voor alle drie de modes; de respons-shape verschilt per mode (zie Build Response * nodes).",
+        "height": 240,
+        "width": 240,
+        "color": 7
+      },
+      "id": "sticky-007",
+      "name": "Sticky: exit",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        5860,
+        -100
       ]
     }
   ],
