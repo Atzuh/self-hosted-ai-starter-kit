@@ -582,6 +582,9 @@ Sinds branch `feature/workflow-hardening-poc` (zie `CHANGES.md` voor detail per 
 | Specialist-LLM-calls werden altijd gedaan (ook bij `signal_count = 0`) | 4 nieuwe IF-nodes **`Vererving / Lasten / Burgerlijke / Burgerlijke Analyse Has Signals?`** routeren bij geen signalen direct naar de Parse-node en slaan de LLM-call over. |
 | Specialist-failure blokkeerde hele analyse | Alle 4 specialist `* LLM Chain` nodes hebben nu `onError: "continueRegularOutput"`. |
 | Magic-number clamp-limieten (10000/14000/26000/8000) verspreid over 6 Code-nodes | Centrale `context_limits`-sectie in `registry.json`; Code-nodes lezen `Number(registry.context_limits.<key>) \|\| <fallback>`. |
+| `dossierExtraMarkdownByExec` global state in Collapse Dossier Markdowns → Build Placeholders | `dossier_markdown` lift mee als veld op de bank+kadaster-items via Build Extraction Prompt en Parse Ollama JSON, en wordt in Build Placeholders uit `bankDoc.dossier_markdown` gelezen. |
+| Generate DOCX retourneerde `REPLACED_BLOCKS: N` op stdout zonder dat de workflow er iets mee deed | `Build Response (akte only)` en `Build Response (akte+analyse)` parsen het getal; bij 0 een `template_warning`-veld in de respons + `replaced_blocks` voor debugging. |
+| Analyse-only flow had alleen Burgerlijke specialist | Toegevoegd: Vererving + Lasten Analyse specialists (5 nodes elk, zelfde patroon en regex-pre-filter als beide-flow). Chain: Aggregate Markdowns → Vererving → Lasten → Burgerlijke → Build Flex Analysis Prompt. Parse Flex Analysis JSON merged nu alle drie. |
 
 ### Argumenten naar Python-scripts
 

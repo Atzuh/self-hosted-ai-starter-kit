@@ -173,6 +173,60 @@ afzonderlijk worden aangepast.
 
 ---
 
+## Extra hardening (na P1–P3, zelfde branch)
+
+### Extra-1 — Verwijder `dossierExtraMarkdownByExec` global state
+
+Tweede toepassing van hetzelfde anti-pattern als `hypoMerge` (P1.1).
+`Collapse Dossier Markdowns` schreef de samengevoegde dossier-
+markdown naar `$getWorkflowStaticData('global').dossierExtraMarkdownByExec[execId]`,
+en `Build Placeholders` haalde 'm later op + verwijderde. Lekte
+bij failures, blokkeerde na restart — zelfde klasse bug als hypoMerge.
+
+**Oplossing.** `dossier_markdown` lift nu mee als veld op beide
+Collapse-output-items (bank + kadaster). `Build Extraction Prompt`
+en `Parse Ollama JSON` forwarden het. `Build Placeholders` leest
+via `bankDoc.dossier_markdown` uit de Aggregate-output. Geen
+functionele wijziging in `kadaster_markdown` van `analysisInput`.
+
+### Extra-2 — `REPLACED_BLOCKS` sanity-check in respons
+
+`vul_template_in.py` printte al `REPLACED_BLOCKS: N` op stdout,
+maar de workflow keek er nooit naar. Bij een template/registry-
+mismatch (verkeerde bank-template gekozen, of placeholder-tag
+fout gespeld in `registry.json`) kreeg de notaris een 200 met een
+Word-document vol onvervangen `<<NAAM_1>>`-tags zonder enige
+indicatie.
+
+**Oplossing.** `Build Response (akte only)` en `Build Response
+(akte+analyse)` parsen nu `REPLACED_BLOCKS` uit de Generate DOCX
+stdout. Bij 0 wordt een `template_warning`-veld gezet met de
+bank-id; ook `replaced_blocks` (het getal) staat in de respons
+voor debugging. `warning` (mode-fallback uit P1.2) blijft een apart
+veld.
+
+### Extra-3 — Vererving + Lasten specialisten in analyse-only flow
+
+De analyse-only flow had alleen een Burgerlijke specialist; de
+beide-flow heeft alle drie. Een flex-dossier met kadaster-
+uittreksel + BRP miste daardoor vererving- en lasten/beperkingen-
+analyses.
+
+**Oplossing.** 10 nieuwe nodes (5 per specialist): `Build * Analyse
+Prompt` → `* Analyse Has Signals?` → `* Analyse LLM Chain` (+
+Ollama Model) → `Parse * Analyse JSON`. Zelfde patroon en
+regex-pre-filters als de beide-flow specialists; IF-gating uit
+P2.1 en `onError=continueRegularOutput` uit P2.2 automatisch
+meegenomen. Clamp-limieten uit `registry.context_limits`. Volgorde
+in de chain: Aggregate Markdowns → Vererving → Lasten → Burgerlijke
+→ Build Flex Analysis Prompt. `Parse Flex Analysis JSON` mergede
+voorheen alleen Burgerlijke; nu alle drie, met dezelfde
+voorrang-regel als `Parse Analysis JSON` in de beide-flow
+(specialist-categorie wint). `counts.specialisten` rapporteert per
+specialist hoeveel aandachtspunten ze toevoegden.
+
+---
+
 ## Affected files
 
 ```
@@ -182,7 +236,7 @@ shared/genereer_juridische_analyse.py                  (P1.3)
 shared/templates/registry.json                         (P3)
 ```
 
-## Toegevoegde nodes (8)
+## Toegevoegde nodes (18)
 
 | Node | Type | Taak |
 |---|---|---|
@@ -194,6 +248,16 @@ shared/templates/registry.json                         (P3)
 | Lasten Has Signals? | `n8n-nodes-base.if` | P2.1 |
 | Burgerlijke Has Signals? | `n8n-nodes-base.if` | P2.1 |
 | Burgerlijke Analyse Has Signals? | `n8n-nodes-base.if` | P2.1 |
+| Build Vererving Analyse Prompt | `n8n-nodes-base.code` | Extra-3 |
+| Vererving Analyse Has Signals? | `n8n-nodes-base.if` | Extra-3 |
+| Vererving Analyse LLM Chain | `@n8n/n8n-nodes-langchain.chainLlm` | Extra-3 |
+| Vererving Analyse Ollama Model | `@n8n/n8n-nodes-langchain.lmChatOllama` | Extra-3 |
+| Parse Vererving Analyse JSON | `n8n-nodes-base.code` | Extra-3 |
+| Build Lasten Analyse Prompt | `n8n-nodes-base.code` | Extra-3 |
+| Lasten Analyse Has Signals? | `n8n-nodes-base.if` | Extra-3 |
+| Lasten Analyse LLM Chain | `@n8n/n8n-nodes-langchain.chainLlm` | Extra-3 |
+| Lasten Analyse Ollama Model | `@n8n/n8n-nodes-langchain.lmChatOllama` | Extra-3 |
+| Parse Lasten Analyse JSON | `n8n-nodes-base.code` | Extra-3 |
 
 ## N8n-instellingen waar deze branch op rekent
 
@@ -211,4 +275,8 @@ shared/templates/registry.json                         (P3)
 - Geen wijzigingen aan extractie- of specialist-prompts in de
   registry (alleen de nieuwe `context_limits` sectie).
 - Geen UI-aanpassingen aan `webapp/`.
-- `dossierExtraMarkdownByExec` global state blijft (apart traject).
+- Mode Route's dubbele rule (`mode === 'analyse'` vs.
+  `!== 'analyse'`) niet opgeruimd — puur leesbaarheid, verandert
+  niets aan gedrag.
+- Output-map (`/data/shared/output/`) heeft geen TTL/rotatie —
+  apart traject.
