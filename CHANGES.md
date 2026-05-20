@@ -252,6 +252,32 @@ klanten-data in beide-mode vs. losse markdown in analyse-mode).
 Netto: 63 → 49 nodes (-14). E2E getest met mode=beide en
 mode=analyse: output-shape identiek aan voor de refactor.
 
+### Extra-6 — Specialisten parallel + `Collect Specialists` report-node
+
+Tot extra-5 waren de drie specialisten (Vererving → Lasten →
+Burgerlijke) sequentieel gekoppeld; elke agent wachtte op de
+vorige. Geen expliciete "bericht naar een node"-reporting van
+wat elke agent had gevonden.
+
+**Oplossing.**
+- Topologie veranderd naar parallelle fan-out: `Deterministic
+  Checks` (beide) en `Aggregate Markdowns` (analyse) connecten
+  elk met alle 3 `Build * Prompt` nodes tegelijk.
+- Nieuwe `Specialist Merge` (`n8n-nodes-base.merge` v3,
+  `combineByPosition`, 3 inputs) wacht tot alle 3 specialisten
+  hun output hebben geleverd.
+- Nieuwe `Collect Specialists` code-node bouwt de gestructureerde
+  payload: per agent `{ name, found, count, signal_count, ran_llm }`
+  + een `summary { total_findings, specialists_with_findings,
+  llm_calls_made, llm_calls_skipped }`. Deze payload is de expliciete
+  "bericht naar een node"-reporting waarom werd gevraagd.
+
+**Belangrijke kanttekening.** n8n's `executionOrder: v1` voert
+nodes single-threaded uit. Echte parallelle LLM-calls vereisen
+`OLLAMA_NUM_PARALLEL > 1` *én* n8n queue-mode. Op deze stack is
+er geen wall-clock speedup; de winst is architectureel (modulariteit,
+expliciete reporting, betere reliability bij hangende agent).
+
 ### Extra-5 — 3-lanes canvas-layout + sticky notes
 
 De canvas was na alle hardening onleesbaar geworden. De drie
@@ -304,7 +330,9 @@ stuurt.
 | Burgerlijke Has Signals? | `n8n-nodes-base.if` | P2.1 |
 | Burgerlijke Analyse Has Signals? | `n8n-nodes-base.if` | P2.1 |
 | Specialist Route | `n8n-nodes-base.switch` | Extra-4 |
-| 7 × Sticky Note | `n8n-nodes-base.stickyNote` | Extra-5 |
+| Specialist Merge | `n8n-nodes-base.merge` | Extra-6 |
+| Collect Specialists | `n8n-nodes-base.code` | Extra-6 |
+| 7 × Sticky Note | `n8n-nodes-base.stickyNote` | Extra-5/6 |
 
 ## N8n-instellingen waar deze branch op rekent
 
