@@ -169,6 +169,29 @@ def _remove_paragraph_element(p_el) -> None:
         parent.remove(p_el)
 
 
+def _rebuild_on_clean_base(doc: Document) -> Document:
+    """Transplanteer de body van ``doc`` in een vers ``Document()``.
+
+    De KNB-bron is een Apple-CocoaOOXMLWriter-package: het mist standaard-
+    parts (styles.xml, settings.xml, fontTable.xml, webSettings.xml,
+    numbering.xml) en bevat een malformed ``customXml``-relatie naar
+    ``docProps/meta.xml``. Microsoft Word opent zo'n package met "Word found
+    unreadable content". Een vers ``Document()`` heeft al die parts correct;
+    we verplaatsen de bewerkte body-inhoud (paragrafen + afsluitende sectPr)
+    daarheen zodat het resulterende .docx een geldige OOXML-package is.
+
+    De body gebruikt directe run-opmaak (rFonts/sz), geen pStyle-referenties,
+    dus er ontstaan geen dangling style-verwijzingen.
+    """
+    base = Document()
+    base_body = base.element.body
+    for child in list(base_body):
+        base_body.remove(child)
+    for child in list(doc.element.body):
+        base_body.append(deepcopy(child))
+    return base
+
+
 def _normalize_ooxml_kebab_case(docx_path: Path) -> dict[str, int]:
     """Normaliseer Cocoa-OOXML kebab-case in alle word/*.xml parts.
 
@@ -440,10 +463,16 @@ def build(input_path: Path, output_path: Path) -> None:
             print(f"  [{i:03d}] {snippet}", file=sys.stderr)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    doc.save(str(output_path))
 
-    # Normaliseer Cocoa-OOXML kebab-case zodat Microsoft Word de template
-    # zonder "unreadable content"-fout opent.
+    # Transplanteer de bewerkte body in een schone python-docx basis zodat de
+    # output alle standaard-OOXML-parts heeft en de Apple-customXml/meta.xml
+    # rommel kwijt is.
+    clean = _rebuild_on_clean_base(doc)
+    clean.save(str(output_path))
+
+    # Normaliseer Cocoa-OOXML kebab-case in de body (die uit de Apple-bron
+    # komt) zodat Microsoft Word de template zonder "unreadable content"-fout
+    # opent.
     normalized = _normalize_ooxml_kebab_case(output_path)
     if normalized:
         detail = ", ".join(f"{Path(k).name}:{v}" for k, v in normalized.items())
