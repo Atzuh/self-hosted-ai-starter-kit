@@ -612,6 +612,33 @@ De Python-scripts (`vul_template_in.py` en `genereer_juridische_analyse.py`) acc
 
 De webhook-URL blijft `http://localhost:5678/webhook/hypotheekakte`.
 
+### Akte-opmaak (`build_template.py`)
+
+De Word-akte volgt de huisstijl van de definitieve KIK-referentie
+(`testdossiers/KIK - Hypotheekakte Rabobank - Definitief.docx`). Alle
+opmaak-logica zit in `bank-models/rabobank/build_template.py` en wordt
+toegepast bij het (her)bouwen van het template:
+
+| Aspect | Waarde | Functie |
+|---|---|---|
+| Lettertype | Arial 12pt | `_apply_reference_formatting` |
+| Regelafstand | 1.15 | `_apply_reference_formatting` |
+| Paginaformaat | A4 (210×297mm) | `_apply_reference_formatting` |
+| Marges (T/B/L/R) | 35/25/50/25 mm | `_apply_reference_formatting` |
+| Witregels | geen (after/before=0 + lege paragrafen weg) | `_apply_reference_formatting` |
+| Sectietitels | Heading 2 (20×) + Heading 3 (`EINDE KADASTERDEEL`), Arial 12pt bold zwart | `_style_section_headings` |
+| Word-compat | kebab→camelCase OOXML + schone python-docx package | `_normalize_ooxml_kebab_case`, `_rebuild_on_clean_base` |
+
+De welke-alinea-is-een-kop mapping staat in `HEADING2_TITLES` /
+`HEADING3_TITLES` (exacte-tekst-whitelist) bovenin het script.
+
+Template herbouwen na een wijziging:
+```
+python3 bank-models/rabobank/build_template.py \
+  --input  bank-models/rabobank/HYRABO00_H1_2018.docx \
+  --output shared/templates/rabobank/template_HYRABO00.docx
+```
+
 ---
 
 ## Bekende aandachtspunten

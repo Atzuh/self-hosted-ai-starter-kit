@@ -300,6 +300,51 @@ nodes bij welke flow horen.
 
 ---
 
+## Akte-output: Word-compatibiliteit + huisstijl (`build_template.py`)
+
+Losse reeks fixes aan de gegenereerde Word-akte. Alle logica zit in
+`bank-models/rabobank/build_template.py`; de runtime-template
+(`shared/templates/rabobank/template_HYRABO00.docx`) is ermee
+herbouwd. De template-binary blijft untracked (binaries-patroon); de
+fix-logica is wél getrackt zodat een rebuild reproduceert.
+
+### T-1 — Word "onleesbare inhoud" opgelost
+
+De KNB-bron is een Apple-CocoaOOXMLWriter-package. Twee problemen:
+- **Kebab-case OOXML** (`<w:sz-cs>`, `w:first-line`) i.p.v. camelCase
+  (`<w:szCs>`, `w:firstLine`). `_normalize_ooxml_kebab_case()` zet ze
+  om in alle `word/*.xml` parts.
+- **Incompleet package**: ontbrekende `styles.xml`/`settings.xml`/
+  `fontTable.xml`/`webSettings.xml` + een malformed `customXml`→
+  `docProps/meta.xml` relatie. `_rebuild_on_clean_base()`
+  transplanteert de body in een vers `Document()` met alle standaard-
+  parts.
+
+### T-2 — KIK-huisstijl (`_apply_reference_formatting()`)
+
+Overgenomen uit `testdossiers/KIK - Hypotheekakte Rabobank -
+Definitief.docx`: **Arial 12pt**, **regelafstand 1.15**, **A4**,
+marges **35/25/50/25 mm** (T/B/L/R). Per-run `Times New Roman` →
+`Arial`; docDefaults + Normal-stijl op Arial 12pt.
+
+### T-3 — Geen witregels
+
+Notariële aktes kennen geen witregels. Twee bronnen weggewerkt:
+docDefaults `w:after=200` (python-docx default, 10pt na elke
+paragraaf) → `before=0/after=0`; en 16 lege trailing-paragrafen
+(restant van het weggesnoeide KNB-trailer-blok) verwijderd.
+
+### T-4 — Kopstijlen (`_style_section_headings()`)
+
+20 sectietitels → **Heading 2**, `EINDE KADASTERDEEL` → **Heading 3**,
+via exacte-tekst-whitelist (`HEADING2_TITLES` / `HEADING3_TITLES`).
+Heading 2/3 herdefinieerd naar de referentie-look (Arial 12pt bold
+zwart, outline-level 1/2, geen extra spacing) i.p.v. python-docx'
+blauwe default. Koppen overleven het invullen door
+`vul_template_in.py`.
+
+---
+
 ## Affected files
 
 ```
@@ -307,7 +352,14 @@ n8n/demo-data/workflows/hypotheekakte-workflow.json    (alle taken)
 shared/vul_template_in.py                              (P1.3)
 shared/genereer_juridische_analyse.py                  (P1.3)
 shared/templates/registry.json                         (P3)
+bank-models/rabobank/build_template.py                 (T-1 t/m T-4)
 ```
+
+> `shared/templates/rabobank/template_HYRABO00.docx` is herbouwd met de
+> T-fixes maar blijft untracked (binaries-patroon). Reproduceer met:
+> `python3 bank-models/rabobank/build_template.py --input
+> bank-models/rabobank/HYRABO00_H1_2018.docx --output
+> shared/templates/rabobank/template_HYRABO00.docx`
 
 ## Verwijderde nodes (15) — door extra-4 dedup
 
