@@ -246,8 +246,12 @@ def _apply_reference_formatting(doc: Document) -> None:
         pPr.append(spacing)
     spacing.set(qn("w:line"), "276")
     spacing.set(qn("w:lineRule"), "auto")
+    # Geen ruimte vóór/ná paragrafen: een notariële akte kent geen witregels
+    # tussen de tekstblokken. (python-docx' default base zet after=200.)
+    spacing.set(qn("w:before"), "0")
+    spacing.set(qn("w:after"), "0")
 
-    # Normal-stijl expliciet ook op Arial 12pt + 1.15
+    # Normal-stijl expliciet ook op Arial 12pt + 1.15, zonder paragraaf-afstand
     try:
         normal = doc.styles["Normal"]
         normal.font.name = "Arial"
@@ -259,6 +263,8 @@ def _apply_reference_formatting(doc: Document) -> None:
             nrpr.insert(0, nrf)
         nrf.set(qn("w:cs"), "Arial")
         normal.paragraph_format.line_spacing = 1.15
+        normal.paragraph_format.space_before = Pt(0)
+        normal.paragraph_format.space_after = Pt(0)
     except KeyError:
         pass
 
@@ -277,6 +283,26 @@ def _apply_reference_formatting(doc: Document) -> None:
         section.bottom_margin = Mm(25)
         section.left_margin = Mm(50)
         section.right_margin = Mm(25)
+
+    # Verwijder lege paragrafen (witregels). Bewaar paragrafen die een
+    # page break, sectie-eigenschappen of een tekening/object bevatten.
+    for p in list(doc.paragraphs):
+        if p.text.strip():
+            continue
+        el = p._p
+        xml = etree.tostring(el, encoding="unicode")
+        keep = (
+            ('w:br' in xml and 'type="page"' in xml)
+            or el.find(qn("w:pPr")) is not None
+            and el.find(qn("w:pPr")).find(qn("w:sectPr")) is not None
+            or "w:drawing" in xml
+            or "pic:pic" in xml
+        )
+        if keep:
+            continue
+        parent = el.getparent()
+        if parent is not None:
+            parent.remove(el)
 
 
 def _normalize_ooxml_kebab_case(docx_path: Path) -> dict[str, int]:
