@@ -40,6 +40,7 @@ from pathlib import Path
 
 from docx import Document
 from docx.oxml.ns import qn
+from docx.shared import Mm, Pt
 from lxml import etree
 
 MACRO = "MacroButton Nomacro §"
@@ -190,6 +191,92 @@ def _rebuild_on_clean_base(doc: Document) -> Document:
     for child in list(doc.element.body):
         base_body.append(deepcopy(child))
     return base
+
+
+def _apply_reference_formatting(doc: Document) -> None:
+    """Pas de huisstijl van de definitieve KIK-akte toe op het template.
+
+    Afkomstig uit de referentie-akte
+    (testdossiers/KIK - Hypotheekakte Rabobank - Definitief.docx):
+      - Arial 12pt
+      - regelafstand 1.15 (w:line=276, auto)
+      - A4 (210x297mm)
+      - marges T/B/L/R = 35/25/50/25 mm
+    """
+    styles_el = doc.styles.element
+
+    # docDefaults: Arial 12pt + 1.15 regelafstand
+    docDefaults = styles_el.find(qn("w:docDefaults"))
+    if docDefaults is None:
+        docDefaults = styles_el.makeelement(qn("w:docDefaults"), {})
+        styles_el.insert(0, docDefaults)
+
+    rPrDefault = docDefaults.find(qn("w:rPrDefault"))
+    if rPrDefault is None:
+        rPrDefault = docDefaults.makeelement(qn("w:rPrDefault"), {})
+        docDefaults.append(rPrDefault)
+    rPr = rPrDefault.find(qn("w:rPr"))
+    if rPr is None:
+        rPr = rPrDefault.makeelement(qn("w:rPr"), {})
+        rPrDefault.append(rPr)
+    rFonts = rPr.find(qn("w:rFonts"))
+    if rFonts is None:
+        rFonts = rPr.makeelement(qn("w:rFonts"), {})
+        rPr.insert(0, rFonts)
+    for attr in ("w:ascii", "w:hAnsi", "w:cs"):
+        rFonts.set(qn(attr), "Arial")
+    for tag in ("w:sz", "w:szCs"):
+        el = rPr.find(qn(tag))
+        if el is None:
+            el = rPr.makeelement(qn(tag), {})
+            rPr.append(el)
+        el.set(qn("w:val"), "24")  # 24 half-points = 12pt
+
+    pPrDefault = docDefaults.find(qn("w:pPrDefault"))
+    if pPrDefault is None:
+        pPrDefault = docDefaults.makeelement(qn("w:pPrDefault"), {})
+        docDefaults.append(pPrDefault)
+    pPr = pPrDefault.find(qn("w:pPr"))
+    if pPr is None:
+        pPr = pPrDefault.makeelement(qn("w:pPr"), {})
+        pPrDefault.append(pPr)
+    spacing = pPr.find(qn("w:spacing"))
+    if spacing is None:
+        spacing = pPr.makeelement(qn("w:spacing"), {})
+        pPr.append(spacing)
+    spacing.set(qn("w:line"), "276")
+    spacing.set(qn("w:lineRule"), "auto")
+
+    # Normal-stijl expliciet ook op Arial 12pt + 1.15
+    try:
+        normal = doc.styles["Normal"]
+        normal.font.name = "Arial"
+        normal.font.size = Pt(12)
+        nrpr = normal.element.get_or_add_rPr()
+        nrf = nrpr.find(qn("w:rFonts"))
+        if nrf is None:
+            nrf = nrpr.makeelement(qn("w:rFonts"), {})
+            nrpr.insert(0, nrf)
+        nrf.set(qn("w:cs"), "Arial")
+        normal.paragraph_format.line_spacing = 1.15
+    except KeyError:
+        pass
+
+    # Per-run directe opmaak: Times New Roman -> Arial
+    for rFontsEl in doc.element.iter(qn("w:rFonts")):
+        for attr in ("w:ascii", "w:hAnsi", "w:cs"):
+            val = rFontsEl.get(qn(attr))
+            if val and "Times" in val:
+                rFontsEl.set(qn(attr), "Arial")
+
+    # A4 + referentie-marges
+    for section in doc.sections:
+        section.page_width = Mm(210)
+        section.page_height = Mm(297)
+        section.top_margin = Mm(35)
+        section.bottom_margin = Mm(25)
+        section.left_margin = Mm(50)
+        section.right_margin = Mm(25)
 
 
 def _normalize_ooxml_kebab_case(docx_path: Path) -> dict[str, int]:
@@ -468,6 +555,11 @@ def build(input_path: Path, output_path: Path) -> None:
     # output alle standaard-OOXML-parts heeft en de Apple-customXml/meta.xml
     # rommel kwijt is.
     clean = _rebuild_on_clean_base(doc)
+
+    # Pas de huisstijl van de definitieve KIK-akte toe (Arial 12pt, 1.15
+    # regelafstand, A4, referentie-marges).
+    _apply_reference_formatting(clean)
+
     clean.save(str(output_path))
 
     # Normaliseer Cocoa-OOXML kebab-case in de body (die uit de Apple-bron
