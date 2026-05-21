@@ -40,8 +40,37 @@ from pathlib import Path
 
 from docx import Document
 from docx.oxml.ns import qn
-from docx.shared import Mm, Pt
+from docx.shared import Mm, Pt, RGBColor
 from lxml import etree
+
+# Sectietitels die als kop (Heading 2) opgemaakt worden. Exacte-tekst-match.
+# Bron: structuur van het HYRABO00-model + de Heading 2-koppen in de
+# definitieve KIK-referentie-akte.
+HEADING2_TITLES = {
+    "Hypotheek- en pandrechten",
+    "Overeenkomst tot het vestigen van hypotheek- en pandrechten",
+    "Hypotheekverlening",
+    "Opeisbaarheid",
+    "Hypotheekbedrag",
+    "Onderpand",
+    "Opzegging",
+    "Woonplaatskeuze",
+    "Debiteur",
+    "Verkrijging onderpand",
+    "Voorbelasting onderpand",
+    "Pandrechten",
+    "Hypotheekbedingen",
+    "Huurbeding",
+    "Veranderingen en toevoegingen",
+    "Beheer en ontruiming",
+    "Meer hypotheekgevers/debiteuren/banken",
+    "Rechten, bevoegdheden en volmacht",
+    "Algemene voorwaarden",
+    "Slot",
+}
+HEADING3_TITLES = {
+    "EINDE KADASTERDEEL",
+}
 
 MACRO = "MacroButton Nomacro §"
 XML_SPACE_PRESERVE = "{http://www.w3.org/XML/1998/namespace}space"
@@ -303,6 +332,56 @@ def _apply_reference_formatting(doc: Document) -> None:
         parent = el.getparent()
         if parent is not None:
             parent.remove(el)
+
+
+def _style_section_headings(doc: Document) -> dict[str, int]:
+    """Pas kopstijlen toe op de sectietitels (Heading 2 / Heading 3).
+
+    De definitieve KIK-akte gebruikt Kop2/Kop3 = Arial 12pt **bold**, zwart,
+    met outline-level (de blauwe kleur zit alleen in een verborgen gelinkte
+    character-stijl, niet in de alinea-kop). python-docx' ingebouwde Heading
+    2/3 zijn blauw + groter, dus we herdefiniëren ze eerst naar de
+    referentie-look en wijzen ze daarna toe op basis van een exacte-tekst-
+    whitelist.
+    """
+    # 1) Herdefinieer Heading 2/3 naar de referentie-look.
+    for sname, lvl in (("Heading 2", 1), ("Heading 3", 2)):
+        try:
+            st = doc.styles[sname]
+        except KeyError:
+            continue
+        st.font.name = "Arial"
+        st.font.size = Pt(12)
+        st.font.bold = True
+        st.font.color.rgb = RGBColor(0x00, 0x00, 0x00)
+        rpr = st.element.get_or_add_rPr()
+        rf = rpr.find(qn("w:rFonts"))
+        if rf is None:
+            rf = rpr.makeelement(qn("w:rFonts"), {})
+            rpr.insert(0, rf)
+        rf.set(qn("w:cs"), "Arial")
+        pf = st.paragraph_format
+        pf.line_spacing = 1.15
+        pf.space_before = Pt(0)
+        pf.space_after = Pt(0)
+        pPr = st.element.get_or_add_pPr()
+        ol = pPr.find(qn("w:outlineLvl"))
+        if ol is None:
+            ol = pPr.makeelement(qn("w:outlineLvl"), {})
+            pPr.append(ol)
+        ol.set(qn("w:val"), str(lvl))
+
+    # 2) Wijs de stijlen toe aan de matchende sectietitel-paragrafen.
+    counts = {"Heading 2": 0, "Heading 3": 0}
+    for p in doc.paragraphs:
+        t = p.text.strip()
+        if t in HEADING2_TITLES:
+            p.style = doc.styles["Heading 2"]
+            counts["Heading 2"] += 1
+        elif t in HEADING3_TITLES:
+            p.style = doc.styles["Heading 3"]
+            counts["Heading 3"] += 1
+    return counts
 
 
 def _normalize_ooxml_kebab_case(docx_path: Path) -> dict[str, int]:
@@ -586,6 +665,9 @@ def build(input_path: Path, output_path: Path) -> None:
     # regelafstand, A4, referentie-marges).
     _apply_reference_formatting(clean)
 
+    # Kopstijlen op de sectietitels (Heading 2/3, referentie-look).
+    heading_counts = _style_section_headings(clean)
+
     clean.save(str(output_path))
 
     # Normaliseer Cocoa-OOXML kebab-case in de body (die uit de Apple-bron
@@ -596,6 +678,10 @@ def build(input_path: Path, output_path: Path) -> None:
         detail = ", ".join(f"{Path(k).name}:{v}" for k, v in normalized.items())
         print(f"OOXML genormaliseerd (kebab→camelCase): {detail}")
 
+    print(
+        f"Kopstijlen toegepast: Heading 2 x{heading_counts['Heading 2']}, "
+        f"Heading 3 x{heading_counts['Heading 3']}"
+    )
     print(f"OK: geschreven naar {output_path}")
     print(f"Paragrafen na verwerking: {len(final_paragraphs)} (model had {len(paragraphs)})")
 
