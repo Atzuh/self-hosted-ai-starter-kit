@@ -11,12 +11,6 @@ import { cn } from "@/lib/utils";
 import type { AppPage } from "@/App";
 
 interface AppHeaderProps {
-  user: {
-    name: string;
-    role: string;
-    initials: string;
-  };
-  environment?: string;
   currentPage: AppPage;
   onNavigate: (page: AppPage) => void;
 }
@@ -32,8 +26,6 @@ const NAV_ITEMS: Array<{
 ];
 
 export function AppHeader({
-  user,
-  environment = "Intern",
   currentPage,
   onNavigate,
 }: AppHeaderProps) {
@@ -119,16 +111,8 @@ export function AppHeader({
           </div>
         </div>
 
-        {/* Environment + notificatie + user */}
+        {/* Notificatie */}
         <div className="ml-auto flex items-center gap-2 lg:ml-0">
-          <div className="hidden items-center gap-1.5 rounded-md border border-line bg-surface px-2 py-1 font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-ink-soft sm:flex">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-success" />
-            </span>
-            {environment}
-          </div>
-
           <button
             type="button"
             className="relative flex h-9 w-9 items-center justify-center rounded-md text-ink-soft transition-colors hover:bg-wash hover:text-ink-strong"
@@ -136,23 +120,6 @@ export function AppHeader({
           >
             <Bell className="h-4 w-4" strokeWidth={2} />
             <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-seal" />
-          </button>
-
-          <button
-            type="button"
-            className="flex items-center gap-2 rounded-md border border-line bg-surface py-1 pl-1 pr-2.5 transition-colors hover:border-line-strong hover:bg-wash"
-          >
-            <div className="flex h-7 w-7 items-center justify-center rounded-sm border border-line-strong bg-ink-deeper font-mono text-[11px] font-semibold text-ink-strong">
-              {user.initials}
-            </div>
-            <div className="hidden flex-col items-start leading-tight sm:flex">
-              <div className="font-sans text-[12px] font-semibold text-ink-strong">
-                {user.name}
-              </div>
-              <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-soft">
-                {user.role}
-              </div>
-            </div>
           </button>
         </div>
       </div>

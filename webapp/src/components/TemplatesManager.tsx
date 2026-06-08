@@ -2,15 +2,30 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  Download,
+  Eye,
   FileText,
   Loader2,
   RefreshCw,
   Upload,
+  X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+
+function templateUrl(bank: BankInfo): string | null {
+  if (!bank.file_exists || !bank.template_filename) return null;
+  return `/templates/${bank.bank_id}/${encodeURIComponent(bank.template_filename)}`;
+}
+
+interface PreviewState {
+  bank: BankInfo;
+  html: string | null;
+  loading: boolean;
+  error: string | null;
+}
 
 const DEFAULT_LIST_URL = "http://localhost:5678/webhook/templates";
 const DEFAULT_UPLOAD_URL = "http://localhost:5678/webhook/upload-template";
@@ -80,6 +95,30 @@ export function TemplatesManager() {
     text: string;
     kind: "success" | "error";
   } | null>(null);
+  const [preview, setPreview] = useState<PreviewState | null>(null);
+
+  const openPreview = useCallback(async (bank: BankInfo) => {
+    const url = templateUrl(bank);
+    if (!url) return;
+    setPreview({ bank, html: null, loading: true, error: null });
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      const arrayBuffer = await res.arrayBuffer();
+      // mammoth (~500 KB) pas laden wanneer de gebruiker daadwerkelijk een
+      // preview opent — houdt de initiële bundel klein.
+      const mammoth = await import("mammoth");
+      const result = await mammoth.convertToHtml({ arrayBuffer });
+      setPreview({ bank, html: result.value, loading: false, error: null });
+    } catch (err) {
+      setPreview({
+        bank,
+        html: null,
+        loading: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, []);
 
   const fetchBanks = useCallback(async () => {
     setIsLoading(true);
@@ -234,6 +273,7 @@ export function TemplatesManager() {
                   : null
               }
               onUpload={(file) => handleUpload(b.bank_id, file)}
+              onPreview={() => openPreview(b)}
             />
           ))}
         </div>
@@ -269,6 +309,10 @@ export function TemplatesManager() {
           </label>
         </div>
       </details>
+
+      {preview && (
+        <TemplatePreviewModal preview={preview} onClose={() => setPreview(null)} />
+      )}
     </div>
   );
 }
@@ -280,9 +324,16 @@ interface BankCardProps {
     | { bankId: string; text: string; kind: "success" | "error" }
     | null;
   onUpload: (file: File) => void;
+  onPreview: () => void;
 }
 
-function BankCard({ bank, isUploading, uploadMessage, onUpload }: BankCardProps) {
+function BankCard({
+  bank,
+  isUploading,
+  uploadMessage,
+  onUpload,
+  onPreview,
+}: BankCardProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const open = () => inputRef.current?.click();
 
@@ -333,6 +384,17 @@ function BankCard({ bank, isUploading, uploadMessage, onUpload }: BankCardProps)
               <span>· {bank.placeholder_count} placeholders</span>
             </div>
           </div>
+          {bank.file_exists && bank.template_filename && (
+            <button
+              type="button"
+              onClick={onPreview}
+              className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-ink-soft transition-colors hover:border-line-strong hover:bg-wash hover:text-ink-strong"
+              title="Bekijk het actieve template in de browser"
+            >
+              <Eye className="h-3.5 w-3.5" strokeWidth={2} />
+              Inzien
+            </button>
+          )}
         </div>
       </div>
 
@@ -408,6 +470,93 @@ function BankCard({ bank, isUploading, uploadMessage, onUpload }: BankCardProps)
             <span>{uploadMessage.text}</span>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function TemplatePreviewModal({
+  preview,
+  onClose,
+}: {
+  preview: PreviewState;
+  onClose: () => void;
+}) {
+  const { bank, html, loading, error } = preview;
+  const url = templateUrl(bank);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="absolute inset-0 bg-ink-deeper/50 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div className="relative flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-line bg-surface shadow-card">
+        <div className="flex items-start justify-between gap-3 border-b border-line/70 px-5 py-4">
+          <div className="min-w-0">
+            <div className="text-[15px] font-semibold leading-tight text-ink-strong">
+              {bank.display_name} — template
+            </div>
+            <div className="mt-0.5 break-all font-mono text-[11px] text-ink-soft">
+              {bank.template_filename}
+            </div>
+          </div>
+          <div className="flex flex-shrink-0 items-center gap-2">
+            {url && (
+              <a
+                href={url}
+                download={bank.template_filename ?? undefined}
+                className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-ink-soft transition-colors hover:border-line-strong hover:bg-wash hover:text-ink-strong"
+              >
+                <Download className="h-3.5 w-3.5" strokeWidth={2} />
+                Download
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Sluiten"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-ink-soft transition-colors hover:bg-wash hover:text-ink-strong"
+            >
+              <X className="h-4 w-4" strokeWidth={2} />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto bg-wash/40 p-5">
+          {loading && (
+            <div className="flex items-center justify-center gap-2 py-16 text-sm text-ink-soft">
+              <Loader2 className="h-5 w-5 animate-spin" strokeWidth={2} />
+              Template laden…
+            </div>
+          )}
+          {error && (
+            <div className="py-16 text-center text-sm">
+              <div className="text-danger">Kon template niet laden.</div>
+              <div className="mt-1 font-mono text-[11px] text-ink-soft">{error}</div>
+            </div>
+          )}
+          {html && (
+            <div className="mx-auto max-w-2xl rounded-md bg-white p-8 shadow-card">
+              <div
+                className="docx-preview text-[13px] leading-relaxed"
+                dangerouslySetInnerHTML={{ __html: html }}
+              />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

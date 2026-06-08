@@ -8,20 +8,12 @@ import { AppFooter } from "@/components/AppFooter";
 
 export type AppPage = "controle" | "generator" | "templates";
 
-const CURRENT_USER = {
-  name: "J. de Vries",
-  role: "Notarieel medewerker",
-  initials: "JV",
-};
-
 export default function App() {
   const [page, setPage] = useState<AppPage>("generator");
 
   return (
     <div className="flex min-h-screen flex-col bg-paper">
       <AppHeader
-        user={CURRENT_USER}
-        environment="Intern · DEV"
         currentPage={page}
         onNavigate={setPage}
       />

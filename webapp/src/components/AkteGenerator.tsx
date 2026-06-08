@@ -397,14 +397,14 @@ export function AkteGenerator() {
             active={mode === "akte"}
             icon={<FileText className="h-4 w-4" strokeWidth={1.75} />}
             label={MODE_META.akte.shortLabel}
-            sublabel="Alleen .docx-akte"
+            sublabel="Concept-akte uit dossier"
             onClick={() => handleModeChange("akte")}
           />
           <ModeCard
             active={mode === "analyse"}
             icon={<Scale className="h-4 w-4" strokeWidth={1.75} />}
             label={MODE_META.analyse.shortLabel}
-            sublabel="Alleen analyse"
+            sublabel="Juridische eerste lezing"
             onClick={() => handleModeChange("analyse")}
           />
         </div>
