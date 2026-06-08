@@ -9,7 +9,10 @@ networks:
   demo:
 
 x-n8n: &service-n8n
-  image: n8nio/n8n:latest
+  build:
+    context: .
+    dockerfile: n8n/Dockerfile
+  image: self-hosted-ai-starter-kit-n8n:latest
   networks: ['demo']
   environment:
     - DB_TYPE=postgresdb
@@ -23,6 +26,10 @@ x-n8n: &service-n8n
     - OLLAMA_HOST=${OLLAMA_HOST:-ollama:11434}
     - N8N_RESTRICT_FILE_ACCESS_TO=/data/shared
     - NODES_EXCLUDE=[]
+    # Sta het Node.js fs/path-builtin toe in Code-nodes zodat workflows
+    # de templates-registry van schijf kunnen lezen (alleen lezen, en
+    # filesystem-toegang is gerestricteerd tot /data/shared via bovenstaande env).
+    - NODE_FUNCTION_ALLOW_BUILTIN=fs,path
   env_file:
     - path: .env
       required: true
@@ -76,6 +83,8 @@ x-docling: &service-docling
     - GRADIO_ALLOWED_PATHS=/shared
     - GRADIO_TEMP_DIR=/shared/docling-scratch
     - DOCLING_SERVE_ENABLE_REMOTE_SERVICES=true
+    # Sync /v1/convert/* wacht max. dit aantal seconden op conversie (default 120 → 504 bij zware OCR)
+    - DOCLING_SERVE_MAX_SYNC_WAIT=600
   volumes:
     - docling_data:/data
     - ./shared:/shared
@@ -119,6 +128,10 @@ services:
           echo "First run detected - importing demo data..."
           n8n import:credentials --separate --input=/demo-data/credentials
           n8n import:workflow --separate --input=/demo-data/workflows
+          # Activeer gepubliceerde versies (aanbevolen: publish:workflow i.p.v. update:workflow).
+          n8n publish:workflow --id=hypotheekakte-e2e
+          n8n publish:workflow --id=templates-management
+          n8n publish:workflow --id=aktecontrole
           touch /demo-data/.imported
           echo "Import complete"
         fi
@@ -141,7 +154,6 @@ services:
       - n8n_storage:/home/node/.n8n
       - ./n8n/demo-data:/demo-data
       - ./shared:/data/shared
-      - ./shared/rag-files:/data/rag-files
     depends_on:
       postgres:
         condition: service_healthy
@@ -160,34 +172,36 @@ services:
       - qdrant_storage:/qdrant/storage
 
   # ===========================================
-  # Static File Server - Serves shared folder
+  # Scriptor Webapp (React + shadcn/ui)
   # ===========================================
-  # Access files at http://localhost:8080/
-  # Example: http://localhost:8080/extracted-images/image_xxx.png
-  static-files:
-    image: nginx:alpine
-    hostname: static-files
-    container_name: static-files
+  # Bouwt de React app en serveert 'm via nginx op http://localhost:8080
+  # nginx alias maakt ook /output/ beschikbaar (gegenereerde aktes)
+  webapp:
+    build:
+      context: ./webapp
+      dockerfile: Dockerfile
+    image: self-hosted-ai-starter-kit-webapp:latest
+    container_name: webapp
+    hostname: webapp
     networks: ['demo']
     restart: unless-stopped
     ports:
       - 8080:80
     volumes:
-      - ./shared/extracted-images:/usr/share/nginx/html:ro
-    command: |
-      sh -c "echo 'server {
-        listen 80;
-        root /usr/share/nginx/html;
-        index chat.html;
-        autoindex on;
-        location / {
-          try_files \$$uri \$$uri/ =404;
-          add_header Access-Control-Allow-Origin *;
-        }
-      }' > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
+      - ./shared:/shared:ro
 
+  # ===========================================
+  # Ollama (Docker — uitgeschakeld op macOS)
+  # ===========================================
+  # Op Apple Silicon draaien we Ollama NATIVE op de host (Metal/GPU),
+  # niet in Docker. Containers bereiken Ollama via
+  # http://host.docker.internal:11434 (zie OLLAMA_HOST in .env).
+  # Deze services zitten daarom in een apart profile 'ollama-docker' en
+  # starten niet meer mee met `--profile cpu`. Wil je toch de Docker-
+  # versie gebruiken (bv. op Linux), draai dan met
+  # `docker compose --profile ollama-docker up`.
   ollama-cpu:
-    profiles: ["cpu"]
+    profiles: ["ollama-docker"]
     <<: *service-ollama
 
   ollama-gpu:
@@ -210,7 +224,7 @@ services:
       - "/dev/dri"
 
   ollama-pull-llama-cpu:
-    profiles: ["cpu"]
+    profiles: ["ollama-docker"]
     <<: *init-ollama
     depends_on:
       - ollama-cpu
@@ -252,6 +266,7 @@ services:
       - GRADIO_TEMP_DIR=/shared/docling-scratch
       - NVIDIA_VISIBLE_DEVICES=all
       - DOCLING_SERVE_ENABLE_REMOTE_SERVICES=true
+      - DOCLING_SERVE_MAX_SYNC_WAIT=600
     runtime: nvidia
 
   docling-gpu-amd:
@@ -266,6 +281,7 @@ services:
       - GRADIO_TEMP_DIR=/shared/docling-scratch
       - ROCR_VISIBLE_DEVICES=0
       - DOCLING_SERVE_ENABLE_REMOTE_SERVICES=true
+      - DOCLING_SERVE_MAX_SYNC_WAIT=600
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri

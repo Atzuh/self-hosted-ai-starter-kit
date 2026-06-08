@@ -1,0 +1,247 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Scriptor — De Rivieren Notarissen
+       Dark theme: diep navy/zwart canvas + DRN-blauw accent + seal-goud.
+    */
+
+    /* Oppervlakken — diep navy/zwart */
+    --paper: 220 38% 6%;            /* #0A0F18 — diep navy-zwart canvas */
+    --paper-strong: 220 36% 8%;     /* iets opgetild canvas */
+    --surface: 220 30% 11%;         /* #131923 — kaart-oppervlak */
+    --wash: 220 28% 14%;            /* hover-tint */
+    --wash-strong: 220 22% 18%;     /* deep hover */
+
+    /* Inkt — warm-witte schaal op donker */
+    --ink-strong: 36 30% 96%;       /* #FAF7F1 — koppen / kerntekst */
+    --ink: 220 14% 78%;             /* body */
+    --ink-soft: 220 10% 60%;        /* meta */
+    --ink-mute: 220 10% 42%;        /* placeholders / dempen */
+
+    /* Diepere zwart-tonen voor accent-panelen */
+    --ink-deep: 220 55% 3%;         /* near-black met blue */
+    --ink-deeper: 220 70% 2%;       /* puur diep zwart */
+
+    /* Lijnen */
+    --line: 220 20% 18%;            /* hairline op donker */
+    --line-strong: 220 18% 26%;     /* duidelijker */
+    --line-dark: 220 35% 10%;       /* op extra-donker */
+
+    /* Merkkleur — DRN azure (heller op donker) */
+    --azure: 209 92% 56%;           /* helderder DRN-blauw */
+    --azure-dark: 210 90% 38%;
+    --azure-bright: 209 95% 64%;
+    --azure-glow: 209 95% 72%;      /* glow op donker */
+    --azure-pale: 209 50% 14%;      /* azure tint-paneel */
+
+    /* Seal — wax-goud accent */
+    --seal: 36 65% 60%;             /* helderder goud op donker */
+    --seal-soft: 36 40% 22%;
+    --seal-deep: 36 60% 74%;        /* licht goud — bruikbaar als tekst */
+
+    /* Status — pop op donker */
+    --success: 152 60% 50%;
+    --success-pale: 152 40% 12%;
+    --danger: 352 75% 62%;
+    --danger-pale: 352 45% 14%;
+    --amber: 38 92% 60%;
+    --amber-pale: 38 50% 14%;
+
+    /* shadcn token-mapping */
+    --background: var(--paper);
+    --foreground: var(--ink-strong);
+    --card: var(--surface);
+    --card-foreground: var(--ink-strong);
+    --popover: var(--surface);
+    --popover-foreground: var(--ink-strong);
+    --primary: var(--azure);
+    --primary-foreground: 0 0% 100%;
+    --secondary: var(--wash);
+    --secondary-foreground: var(--ink-strong);
+    --muted: var(--wash);
+    --muted-foreground: var(--ink-soft);
+    --accent: var(--azure);
+    --accent-foreground: 0 0% 100%;
+    --destructive: var(--danger);
+    --destructive-foreground: 0 0% 100%;
+    --border: var(--line);
+    --input: var(--line-strong);
+    --ring: var(--azure);
+
+    --radius: 6px;
+
+    color-scheme: dark;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    background-color: hsl(var(--paper));
+  }
+
+  body {
+    @apply bg-paper text-ink font-sans;
+    font-feature-settings: "kern" 1, "calt" 1, "ss01" 1, "ss02" 1, "cv11" 1;
+    font-size: 15px;
+    line-height: 1.6;
+    letter-spacing: -0.005em;
+    min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-image:
+      radial-gradient(
+        1200px 600px at 85% -10%,
+        hsla(209, 95%, 55%, 0.14),
+        transparent 60%
+      ),
+      radial-gradient(
+        900px 500px at -10% 110%,
+        hsla(36, 70%, 55%, 0.07),
+        transparent 60%
+      ),
+      radial-gradient(
+        700px 400px at 50% 120%,
+        hsla(220, 80%, 30%, 0.18),
+        transparent 65%
+      );
+    background-attachment: fixed;
+  }
+
+  /* Fraunces wordt alleen voor hero gebruikt — opsz=144 voor display-look,
+     subtle SOFT-axis (warmer rondingen). */
+  .font-display {
+    font-variation-settings: "opsz" 144, "SOFT" 50;
+    font-feature-settings: "ss01" 1, "ss02" 1, "ss03" 1, "kern" 1;
+    letter-spacing: -0.022em;
+  }
+
+  h1, h2, h3, h4 {
+    @apply text-ink-strong;
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+  }
+
+  /* "Kicker" — kleine kapitalen-label boven secties */
+  .kicker {
+    @apply font-sans text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft;
+  }
+
+  /* "Eyebrow" — supersmal grijs label */
+  .eyebrow {
+    @apply font-mono text-[10.5px] font-medium uppercase tracking-[0.18em] text-ink-mute;
+  }
+
+  /* Scrollbar — donker thema */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--paper));
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--line-strong));
+    border-radius: 8px;
+    border: 2px solid hsl(var(--paper));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--ink-mute));
+  }
+
+  /* Selectie */
+  ::selection {
+    background: hsla(209, 92%, 56%, 0.35);
+    color: hsl(var(--ink-strong));
+  }
+}
+
+@layer components {
+  /* Fey-style grid op donker panel */
+  .bg-grid-dark {
+    background-image:
+      linear-gradient(hsla(0, 0%, 100%, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, hsla(0, 0%, 100%, 0.035) 1px, transparent 1px);
+    background-size: 48px 48px;
+    background-position: 0 0;
+  }
+
+  /* Subtiele blauw-glow op cards */
+  .card-paper {
+    background-color: hsl(var(--surface));
+    background-image:
+      radial-gradient(
+        circle at 20% 0%,
+        hsla(209, 70%, 30%, 0.22),
+        transparent 50%
+      );
+  }
+
+  /* CTA paneel — diepste zwart met blauwe glow (Fey terminal) */
+  .dark-panel {
+    background-color: hsl(var(--ink-deep));
+    color: hsl(var(--ink-strong));
+    background-image:
+      radial-gradient(
+        800px 420px at 100% 0%,
+        hsla(209, 95%, 50%, 0.28),
+        transparent 60%
+      ),
+      radial-gradient(
+        600px 360px at 0% 100%,
+        hsla(36, 70%, 55%, 0.16),
+        transparent 60%
+      ),
+      linear-gradient(
+        180deg,
+        hsl(var(--ink-deep)) 0%,
+        hsl(var(--ink-deeper)) 100%
+      );
+    border: 1px solid hsl(var(--line-dark));
+  }
+
+  /* CTA paneel — zelfde rustige surface als de andere kaarten,
+     met heel subtiele blauwe glow rechtsboven voor accent. */
+  .cta-panel {
+    background-color: hsl(var(--surface));
+    color: hsl(var(--ink-strong));
+    background-image:
+      radial-gradient(
+        700px 360px at 100% 0%,
+        hsla(209, 95%, 55%, 0.10),
+        transparent 60%
+      ),
+      radial-gradient(
+        500px 320px at 0% 100%,
+        hsla(36, 70%, 55%, 0.05),
+        transparent 60%
+      );
+    border: 1px solid hsl(var(--line));
+  }
+
+  /* Hele subtiele grid op cta-panel */
+  .bg-grid-blue {
+    background-image:
+      linear-gradient(hsla(209, 100%, 80%, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, hsla(209, 100%, 80%, 0.025) 1px, transparent 1px);
+    background-size: 48px 48px;
+    background-position: 0 0;
+  }
+
+  /* Hairline divider met fade */
+  .divider-fade {
+    height: 1px;
+    background: linear-gradient(
+      to right,
+      transparent,
+      hsl(var(--line-strong)) 20%,
+      hsl(var(--line-strong)) 80%,
+      transparent
+    );
+  }
+}

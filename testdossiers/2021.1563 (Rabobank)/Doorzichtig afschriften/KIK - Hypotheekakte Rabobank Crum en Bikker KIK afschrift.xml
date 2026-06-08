@@ -1,0 +1,394 @@
+<?xml version="1.0" encoding="utf-8"?>
+<tia:Bericht_TIA_Stuk xmlns:tia="http://www.kadaster.nl/schemas/KIK/TIA_Algemeen" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:rabo="http://www.kadaster.nl/schemas/KIK/RabobankHypotheekakte/v20180901">
+  <tia:nummerStylesheet>20181015000005</tia:nummerStylesheet>
+  <tia:implementatienummer>1</tia:implementatienummer>
+  <tia:softwareleverancier>
+    <tia:bedrijfsnaam>Dirict</tia:bedrijfsnaam>
+    <tia:naam>Notarisdossier</tia:naam>
+    <tia:versie>20210622</tia:versie>
+  </tia:softwareleverancier>
+  <tia:IMKAD_AangebodenStuk>
+    <tia:tia_DatumOndertekening>2021-06-22</tia:tia_DatumOndertekening>
+    <tia:tia_TijdOndertekening>14:52:00</tia:tia_TijdOndertekening>
+    <tia:Partij id="party.1">
+      <tia:aanduidingPartij>de Hypotheekgever</tia:aanduidingPartij>
+      <tia:IMKAD_Persoon id="party.1.person.1">
+        <tia:tia_Gegevens>
+          <tia:GBA_Ingezetene>
+            <tia:BSN>205150512</tia:BSN>
+            <tia:naam>
+              <tia:voornamen>MARINUS ADRIAAN</tia:voornamen>
+            </tia:naam>
+            <tia:geboorte>
+              <tia:geboortedatum>1991-02-19</tia:geboortedatum>
+              <tia:geboorteplaatsOmschrijving>Gorinchem</tia:geboorteplaatsOmschrijving>
+            </tia:geboorte>
+            <tia:geslacht>
+              <tia:geslachtsaanduiding>Man</tia:geslachtsaanduiding>
+            </tia:geslacht>
+            <tia:tia_NaamZonderVoorvoegsels>CRUM</tia:tia_NaamZonderVoorvoegsels>
+          </tia:GBA_Ingezetene>
+        </tia:tia_Gegevens>
+        <tia:tia_TekstKeuze>
+          <tia:tagNaam>k_BurgerlijkeStaatTekstPartners</tia:tagNaam>
+          <tia:tekst>10</tia:tekst>
+        </tia:tia_TekstKeuze>
+        <tia:tia_TekstKeuze>
+          <tia:tagNaam>k_KeuzeblokVariant</tia:tagNaam>
+          <tia:tekst>4</tia:tekst>
+        </tia:tia_TekstKeuze>
+        <tia:tia_BurgerlijkeStaatTekst>gehuwd</tia:tia_BurgerlijkeStaatTekst>
+        <tia:tia_Legitimatiebewijs>
+          <tia:soort>rijbewijs</tia:soort>
+          <tia:kenmerk>5785266690</tia:kenmerk>
+          <tia:plaatsUitgegeven>Molenlanden</tia:plaatsUitgegeven>
+          <tia:datumUitgegeven>2020-04-16</tia:datumUitgegeven>
+        </tia:tia_Legitimatiebewijs>
+        <tia:tia_IndGerechtigde>true</tia:tia_IndGerechtigde>
+        <tia:GerelateerdPersoon>
+          <tia:rol>partner</tia:rol>
+          <tia:IndGezamenlijkeWoonlocatie>true</tia:IndGezamenlijkeWoonlocatie>
+          <tia:IndGezamenlijkeToekomstigeWoonlocatie>true</tia:IndGezamenlijkeToekomstigeWoonlocatie>
+          <tia:IMKAD_Persoon id="party.1.person.2">
+            <tia:tia_Gegevens>
+              <tia:GBA_Ingezetene>
+                <tia:BSN>205444362</tia:BSN>
+                <tia:naam>
+                  <tia:voornamen>PIETERNELLA</tia:voornamen>
+                </tia:naam>
+                <tia:geboorte>
+                  <tia:geboortedatum>1991-02-10</tia:geboortedatum>
+                  <tia:geboorteplaatsOmschrijving>Gorinchem</tia:geboorteplaatsOmschrijving>
+                </tia:geboorte>
+                <tia:geslacht>
+                  <tia:geslachtsaanduiding>Vrouw</tia:geslachtsaanduiding>
+                </tia:geslacht>
+                <tia:tia_NaamZonderVoorvoegsels>BIKKER</tia:tia_NaamZonderVoorvoegsels>
+              </tia:GBA_Ingezetene>
+            </tia:tia_Gegevens>
+            <tia:tia_Legitimatiebewijs>
+              <tia:soort>rijbewijs</tia:soort>
+              <tia:kenmerk>5788617388</tia:kenmerk>
+              <tia:plaatsUitgegeven>Molenlanden</tia:plaatsUitgegeven>
+              <tia:datumUitgegeven>2019-10-30</tia:datumUitgegeven>
+            </tia:tia_Legitimatiebewijs>
+            <tia:tia_IndGerechtigde>true</tia:tia_IndGerechtigde>
+          </tia:IMKAD_Persoon>
+        </tia:GerelateerdPersoon>
+        <tia:IMKAD_WoonlocatiePersoon>
+          <tia:adres>
+            <tia:binnenlandsAdres>
+              <tia:BAG_NummerAanduiding>
+                <tia:huisnummer>14</tia:huisnummer>
+                <tia:postcode>4223NL</tia:postcode>
+              </tia:BAG_NummerAanduiding>
+              <tia:BAG_OpenbareRuimte>
+                <tia:openbareRuimteNaam>Oudendijk</tia:openbareRuimteNaam>
+              </tia:BAG_OpenbareRuimte>
+              <tia:BAG_Woonplaats>
+                <tia:woonplaatsNaam>Hoornaar</tia:woonplaatsNaam>
+              </tia:BAG_Woonplaats>
+            </tia:binnenlandsAdres>
+          </tia:adres>
+        </tia:IMKAD_WoonlocatiePersoon>
+      </tia:IMKAD_Persoon>
+    </tia:Partij>
+    <tia:Partij xmlns:xlink="http://www.w3.org/1999/xlink" id="party.2">
+      <tia:aanduidingPartij>de bank</tia:aanduidingPartij>
+      <tia:Hoedanigheid id="party.2.hoedanigheid.1">
+        <tia:tekstKeuze>
+          <tia:tagNaam>k_HoedanigheidVariant</tia:tagNaam>
+          <tia:tekst>5</tia:tekst>
+        </tia:tekstKeuze>
+        <tia:tekstKeuze>
+          <tia:tagNaam>k_HoedanigheidTekstVariant5</tia:tagNaam>
+          <tia:tekst>1</tia:tekst>
+        </tia:tekstKeuze>
+      </tia:Hoedanigheid>
+      <tia:Gevolmachtigde xmlns:xlink="http://www.w3.org/1999/xlink">
+        <tia:gegevens>
+          <tia:persoonGegevens>
+            <tia:naam>
+              <tia:voornamen>RENÉE PETRONELLA WILHELMINA</tia:voornamen>
+            </tia:naam>
+            <tia:geboorte>
+              <tia:geboortedatum>1998-11-30</tia:geboortedatum>
+              <tia:geboorteplaatsOmschrijving>Loon op Zand</tia:geboorteplaatsOmschrijving>
+            </tia:geboorte>
+            <tia:geslacht>
+              <tia:geslachtsaanduiding>Vrouw</tia:geslachtsaanduiding>
+            </tia:geslacht>
+            <tia:tia_NaamZonderVoorvoegsels>KUIS</tia:tia_NaamZonderVoorvoegsels>
+          </tia:persoonGegevens>
+          <tia:adresKantoor>
+            <tia:BAG_NummerAanduiding>
+              <tia:huisnummer>49</tia:huisnummer>
+              <tia:huisletter>A</tia:huisletter>
+              <tia:postcode>4251VT</tia:postcode>
+            </tia:BAG_NummerAanduiding>
+            <tia:BAG_OpenbareRuimte>
+              <tia:openbareRuimteNaam>Van Randwijklaan</tia:openbareRuimteNaam>
+            </tia:BAG_OpenbareRuimte>
+            <tia:BAG_Woonplaats>
+              <tia:woonplaatsNaam>Werkendam</tia:woonplaatsNaam>
+            </tia:BAG_Woonplaats>
+          </tia:adresKantoor>
+        </tia:gegevens>
+        <tia:tekstkeuze>
+          <tia:tagNaam>k_VerantwoordelijkheidNotaris</tia:tagNaam>
+          <tia:tekst>false</tia:tekst>
+        </tia:tekstkeuze>
+        <tia:tekstkeuze>
+          <tia:tagNaam>k_Optie</tia:tagNaam>
+          <tia:tekst>1</tia:tekst>
+        </tia:tekstkeuze>
+        <tia:vertegenwoordigtRef xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#party.2.hoedanigheid.1"/>
+      </tia:Gevolmachtigde>
+      <tia:IMKAD_Persoon id="party.2.person.1">
+        <tia:tia_Gegevens>
+          <tia:NHR_Rechtspersoon>
+            <tia:FINummer>30046259</tia:FINummer>
+            <tia:rechtsvormSub>coöperatie</tia:rechtsvormSub>
+            <tia:statutaireNaam>COÖPERATIEVE RABOBANK U.A.</tia:statutaireNaam>
+            <tia:statutaireZetel>Amsterdam</tia:statutaireZetel>
+          </tia:NHR_Rechtspersoon>
+        </tia:tia_Gegevens>
+        <tia:tia_TekstKeuze>
+          <tia:tagNaam>k_Statutair</tia:tagNaam>
+          <tia:tekst>statutair</tia:tekst>
+        </tia:tia_TekstKeuze>
+        <tia:tia_TekstKeuze>
+          <tia:tagNaam>k_Kantoorhoudende</tia:tagNaam>
+          <tia:tekst>kantoorhoudende te</tia:tekst>
+        </tia:tia_TekstKeuze>
+        <tia:tia_TekstKeuze>
+          <tia:tagNaam>k_KvK</tia:tagNaam>
+          <tia:tekst>van de Kamer van Koophandel</tia:tekst>
+        </tia:tia_TekstKeuze>
+        <tia:tia_IndGerechtigde>true</tia:tia_IndGerechtigde>
+        <tia:IMKAD_WoonlocatiePersoon>
+          <tia:adres>
+            <tia:binnenlandsAdres>
+              <tia:BAG_NummerAanduiding>
+                <tia:huisnummer>18</tia:huisnummer>
+                <tia:postcode>3521CB</tia:postcode>
+              </tia:BAG_NummerAanduiding>
+              <tia:BAG_OpenbareRuimte>
+                <tia:openbareRuimteNaam>Croeselaan</tia:openbareRuimteNaam>
+              </tia:BAG_OpenbareRuimte>
+              <tia:BAG_Woonplaats>
+                <tia:woonplaatsNaam>Utrecht</tia:woonplaatsNaam>
+              </tia:BAG_Woonplaats>
+            </tia:binnenlandsAdres>
+          </tia:adres>
+        </tia:IMKAD_WoonlocatiePersoon>
+        <tia:IMKAD_PostlocatiePersoon>
+          <tia:adres>
+            <tia:postbusAdres>
+              <tia:postbusnummer>221</tia:postbusnummer>
+              <tia:postcode>5600MA</tia:postcode>
+              <tia:woonplaatsnaam>Eindhoven</tia:woonplaatsnaam>
+            </tia:postbusAdres>
+          </tia:adres>
+        </tia:IMKAD_PostlocatiePersoon>
+      </tia:IMKAD_Persoon>
+    </tia:Partij>
+    <tia:tia_TekstKeuze>
+      <tia:tagNaam>k_Dagaanduiding</tia:tagNaam>
+      <tia:tekst>Heden</tia:tekst>
+    </tia:tia_TekstKeuze>
+    <tia:tia_TekstKeuze>
+      <tia:tagNaam>k_TitelHypotheek</tia:tagNaam>
+      <tia:tekst>Hypotheek</tia:tekst>
+    </tia:tia_TekstKeuze>
+    <tia:tia_TekstKeuze>
+      <tia:tagNaam>k_Woonplaatskeuze</tia:tagNaam>
+      <tia:tekst>Voor het uitvoeren van de rechten en verplichtingen uit deze akte kiezen de hypotheekgever en de bank woonplaats op het kantoor van de bewaarder van deze akte.</tia:tekst>
+    </tia:tia_TekstKeuze>
+    <tia:tia_TekstKeuze>
+      <tia:tagNaam>k_Offertenummer</tia:tagNaam>
+      <tia:tekst>4003164133</tia:tekst>
+    </tia:tia_TekstKeuze>
+    <tia:tia_TekstKeuze>
+      <tia:tagNaam>k_SoortDocument</tia:tagNaam>
+      <tia:tekst>afschrift</tia:tekst>
+    </tia:tia_TekstKeuze>
+    <tia:tia_OmschrijvingZaak>DW/2021.1563.01</tia:tia_OmschrijvingZaak>
+    <tia:StukdeelHypotheek xmlns:xlink="http://www.w3.org/1999/xlink">
+      <tia:IMKAD_ZakelijkRecht>
+        <tia:IMKAD_Perceel>
+          <tia:kadastraleAanduiding>
+            <tia:gemeente>Hoornaar</tia:gemeente>
+            <tia:sectie>A</tia:sectie>
+            <tia:perceelnummer>291</tia:perceelnummer>
+          </tia:kadastraleAanduiding>
+          <tia:tia_OmschrijvingEigendom>het woonhuis met ondergrond, erf, tuin, met al datgene wat volgens verkeersopvatting daartoe behoort, staande en</tia:tia_OmschrijvingEigendom>
+          <tia:tia_Tekstkeuze>
+            <tia:tagNaam>k_Aanduiding</tia:tagNaam>
+            <tia:tekst>3</tia:tekst>
+          </tia:tia_Tekstkeuze>
+          <tia:IMKAD_OZLocatie>
+            <tia:adres>
+              <tia:BAG_NummerAanduiding>
+                <tia:huisnummer>14</tia:huisnummer>
+                <tia:postcode>4223NL</tia:postcode>
+              </tia:BAG_NummerAanduiding>
+              <tia:BAG_OpenbareRuimte>
+                <tia:openbareRuimteNaam>Oudendijk</tia:openbareRuimteNaam>
+              </tia:BAG_OpenbareRuimte>
+              <tia:BAG_Woonplaats>
+                <tia:woonplaatsNaam>Hoornaar</tia:woonplaatsNaam>
+              </tia:BAG_Woonplaats>
+            </tia:adres>
+            <tia:ligging>te</tia:ligging>
+          </tia:IMKAD_OZLocatie>
+          <tia:grootte>180</tia:grootte>
+        </tia:IMKAD_Perceel>
+        <tia:aardVerkregen>EIGENDOM</tia:aardVerkregen>
+        <tia:tia_TekstKeuze>
+          <tia:tagNaam>k_Eigendom</tia:tagNaam>
+          <tia:tekst>het recht van eigendom met betrekking tot</tia:tekst>
+        </tia:tia_TekstKeuze>
+        <tia:tia_TekstKeuze>
+          <tia:tagNaam>k_VoorlopigeGrenzen</tia:tagNaam>
+          <tia:tekst>false</tia:tekst>
+        </tia:tia_TekstKeuze>
+      </tia:IMKAD_ZakelijkRecht>
+      <tia:IMKAD_ZakelijkRecht>
+        <tia:IMKAD_Perceel>
+          <tia:kadastraleAanduiding>
+            <tia:gemeente>Hoornaar</tia:gemeente>
+            <tia:sectie>B</tia:sectie>
+            <tia:perceelnummer>1308</tia:perceelnummer>
+          </tia:kadastraleAanduiding>
+          <tia:tia_OmschrijvingEigendom>een perceel grond</tia:tia_OmschrijvingEigendom>
+          <tia:tia_Tekstkeuze>
+            <tia:tagNaam>k_Aanduiding</tia:tagNaam>
+            <tia:tekst>3</tia:tekst>
+          </tia:tia_Tekstkeuze>
+          <tia:IMKAD_OZLocatie>
+            <tia:adres>
+              <tia:BAG_NummerAanduiding>
+                <tia:huisnummer>14</tia:huisnummer>
+                <tia:postcode>4223NL</tia:postcode>
+              </tia:BAG_NummerAanduiding>
+              <tia:BAG_OpenbareRuimte>
+                <tia:openbareRuimteNaam>Oudendijk</tia:openbareRuimteNaam>
+              </tia:BAG_OpenbareRuimte>
+              <tia:BAG_Woonplaats>
+                <tia:woonplaatsNaam>Hoornaar</tia:woonplaatsNaam>
+              </tia:BAG_Woonplaats>
+            </tia:adres>
+            <tia:ligging>nabij</tia:ligging>
+          </tia:IMKAD_OZLocatie>
+          <tia:grootte>121</tia:grootte>
+        </tia:IMKAD_Perceel>
+        <tia:aardVerkregen>EIGENDOM BELAST MET OPSTAL NUTSVOORZIENINGEN</tia:aardVerkregen>
+        <tia:tia_Aantal_Rechten>1</tia:tia_Aantal_Rechten>
+        <tia:tia_TekstKeuze>
+          <tia:tagNaam>k_Eigendom</tia:tagNaam>
+          <tia:tekst>het recht van eigendom met betrekking tot</tia:tekst>
+        </tia:tia_TekstKeuze>
+        <tia:tia_TekstKeuze>
+          <tia:tagNaam>k_VoorlopigeGrenzen</tia:tagNaam>
+          <tia:tekst>false</tia:tekst>
+        </tia:tia_TekstKeuze>
+        <tia:tia_TekstKeuze>
+          <tia:tagNaam>k_NaderTeOmschrijven</tia:tagNaam>
+          <tia:tekst>nader te omschrijven</tia:tekst>
+        </tia:tia_TekstKeuze>
+        <tia:tia_TekstKeuze>
+          <tia:tagNaam>k_Meervoud</tia:tagNaam>
+          <tia:tekst>false</tia:tekst>
+        </tia:tia_TekstKeuze>
+      </tia:IMKAD_ZakelijkRecht>
+      <tia:vervreemderRechtRef xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#party.1"/>
+      <tia:verkrijgerRechtRef xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#party.2"/>
+      <tia:hoofdsom>
+        <tia:som>150000.00</tia:som>
+        <tia:valuta>Euro</tia:valuta>
+      </tia:hoofdsom>
+    </tia:StukdeelHypotheek>
+    <tia:heeftVerklaarder>
+      <tia:persoonsgegevens>
+        <tia:naam>
+          <tia:voornamen>Petra</tia:voornamen>
+        </tia:naam>
+        <tia:tia_Titel>mr.</tia:tia_Titel>
+        <tia:tia_NaamZonderVoorvoegsels>ter Braak-van Straten</tia:tia_NaamZonderVoorvoegsels>
+      </tia:persoonsgegevens>
+      <tia:voorletters>P.</tia:voorletters>
+      <tia:tekstkeuze>
+        <tia:tagNaam>k_VerklaarderPlaatsaanduiding</tia:tagNaam>
+        <tia:tekst>met plaats van vestiging</tia:tekst>
+      </tia:tekstkeuze>
+      <tia:tekstkeuze>
+        <tia:tagNaam>k_VerklaarderWaarneming</tia:tagNaam>
+        <tia:tekst>toegevoegd notaris</tia:tekst>
+      </tia:tekstkeuze>
+      <tia:isWaarnemerVoor>
+        <tia:persoonsgegevens>
+          <tia:naam>
+            <tia:voornamen>Stephanus Johannes Gerardus</tia:voornamen>
+          </tia:naam>
+          <tia:tia_Titel>mr.</tia:tia_Titel>
+          <tia:tia_VoorvoegselsNaam>de</tia:tia_VoorvoegselsNaam>
+          <tia:tia_NaamZonderVoorvoegsels>Kort</tia:tia_NaamZonderVoorvoegsels>
+        </tia:persoonsgegevens>
+        <tia:standplaats>Altena</tia:standplaats>
+        <tia:tekstkeuze>
+          <tia:tagNaam>k_VerklaarderPlaatsaanduiding</tia:tagNaam>
+          <tia:tekst>met plaats van vestiging</tia:tekst>
+        </tia:tekstkeuze>
+      </tia:isWaarnemerVoor>
+    </tia:heeftVerklaarder>
+    <tia:heeftOndertekenaar>
+      <tia:persoonsgegevens>
+        <tia:naam>
+          <tia:voornamen>Petra</tia:voornamen>
+        </tia:naam>
+        <tia:tia_Titel>mr.</tia:tia_Titel>
+        <tia:tia_NaamZonderVoorvoegsels>ter Braak-van Straten</tia:tia_NaamZonderVoorvoegsels>
+      </tia:persoonsgegevens>
+      <tia:voorletters>P.</tia:voorletters>
+      <tia:tekstkeuze>
+        <tia:tagNaam>k_OndertekenaarPlaatsaanduiding</tia:tagNaam>
+        <tia:tekst>met plaats van vestiging</tia:tekst>
+      </tia:tekstkeuze>
+      <tia:tekstkeuze>
+        <tia:tagNaam>k_OndertekenaarWaarneming</tia:tagNaam>
+        <tia:tekst>toegevoegd notaris</tia:tekst>
+      </tia:tekstkeuze>
+      <tia:isWaarnemerVoor>
+        <tia:persoonsgegevens>
+          <tia:naam>
+            <tia:voornamen>Stephanus Johannes Gerardus</tia:voornamen>
+          </tia:naam>
+          <tia:tia_Titel>mr.</tia:tia_Titel>
+          <tia:tia_VoorvoegselsNaam>de</tia:tia_VoorvoegselsNaam>
+          <tia:tia_NaamZonderVoorvoegsels>Kort</tia:tia_NaamZonderVoorvoegsels>
+        </tia:persoonsgegevens>
+        <tia:standplaats>Altena</tia:standplaats>
+        <tia:tekstkeuze>
+          <tia:tagNaam>k_OndertekenaarPlaatsaanduiding</tia:tagNaam>
+          <tia:tekst>met plaats van vestiging</tia:tekst>
+        </tia:tekstkeuze>
+      </tia:isWaarnemerVoor>
+    </tia:heeftOndertekenaar>
+  </tia:IMKAD_AangebodenStuk>
+  <tia:partnerSpecifiek>
+    <rabo:BankHypotheek xmlns="http://www.kadaster.nl/schemas/KIK/RabobankHypotheekakte/v20180901"/>
+    <rabo:AanvullendeKosten xmlns="http://www.kadaster.nl/schemas/KIK/RabobankHypotheekakte/v20180901">
+      <rabo:RegistergoedGeenSchip>
+        <rabo:bedragRente>
+          <rabo:som>52500.00</rabo:som>
+          <rabo:valuta>Euro</rabo:valuta>
+        </rabo:bedragRente>
+        <rabo:bedragTotaal>
+          <rabo:som>202500.00</rabo:som>
+          <rabo:valuta>Euro</rabo:valuta>
+        </rabo:bedragTotaal>
+      </rabo:RegistergoedGeenSchip>
+    </rabo:AanvullendeKosten>
+  </tia:partnerSpecifiek>
+</tia:Bericht_TIA_Stuk>

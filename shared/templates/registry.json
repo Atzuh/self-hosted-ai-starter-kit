@@ -1,7 +1,7 @@
 {
   "$comment": "Bank-presets voor Scriptor. Per bank wordt vastgelegd: keywords voor auto-detectie, het actieve template-bestand, de LLM-extractie-prompt voor de passeeropdracht, en de mapping van geëxtraheerde velden naar template-placeholders. De webapp en n8n-workflow lezen dit bestand. Gebruikers updaten alleen het 'template_filename'-veld via de Templates-pagina (door een nieuwe .docx te uploaden); prompts en placeholder-mapping worden door ontwikkelaars onderhouden.",
   "schema_version": 1,
-  "kadaster_extraction_prompt": "Je bent een data-extractie assistent voor een notariskantoor.\nGeef ALLEEN geldige JSON terug. Geen markdown, geen extra tekst.\nBegin direct met { — geen inleidende zin of codefence.\nAls de markdown eindigt op «…[afgekapt voor extractie-context]», gebruik alleen de zichtbare tekst; vul ontbrekende velden met \"\" of [].\n\nExtraheer uit deze Kadaster eigendomsinformatie markdown naar JSON met velden:\n- kadastrale_gemeente\n- kadastrale_sectie\n- kadastrale_nummer\n- kadastrale_grootte_woorden\n- klanten[] met: naam_hoofdletters, voornamen, geboortedatum_dag_woorden, geboortedatum_maand_woorden, geboortedatum_jaar_woorden, geboorteplaats, geboorteland\n\nMarkdown:\n{{markdown}}",
+  "kadaster_extraction_prompt": "Je bent een data-extractie assistent voor een notariskantoor.\nGeef ALLEEN geldige JSON terug. Geen markdown, geen extra tekst.\nBegin direct met { — geen inleidende zin of codefence.\nAls de markdown eindigt op «…[afgekapt voor extractie-context]», gebruik alleen de zichtbare tekst; vul ontbrekende velden met \"\" of [].\n\nExtraheer uit deze Kadaster eigendomsinformatie markdown naar JSON met velden:\n- kadastrale_gemeente\n- kadastrale_sectie\n- kadastrale_nummer\n- kadastrale_grootte_woorden\n- klanten[] met: naam_hoofdletters, voornamen, geboortedatum (exact zoals in de tekst, formaat DD-MM-JJJJ), geboorteplaats, geboorteland\n\nMarkdown:\n{{markdown}}",
   "legal_specialist_prompts": {
     "$comment": "Per-onderwerp gespecialiseerde prompts voor de juridische analyse. Elke specialist krijgt een smalle context en levert aandachtspunten in dezelfde shape als de mega-prompt. Een Code node in n8n parseert het resultaat en voegt het samen met de andere specialisten en de mega-prompt-output. Specialist-categorieën zijn vast (bv. 'Vererving') — het model mag dat veld niet wijzigen.",
     "vererving": "Je bent een ervaren kandidaat-notaris met specialisatie nalatenschappen en boedelafwikkeling. Je beoordeelt UITSLUITEND of de kadastrale eigendomsinformatie aanwijzingen bevat van vererving, overlijden van een rechthebbende, of een (onverdeelde) nalatenschap die een hypotheekvestiging blokkeert of compliceert.\n\nGeef ALLEEN geldige JSON terug. Geen markdown, geen extra tekst, geen toelichting buiten de JSON. Antwoord in het Nederlands.\n\nSchema:\n{\n  \"aandachtspunten\": [\n    {\n      \"id\": \"<korte slug, bv. 'vererving-overleden-rechthebbende'>\",\n      \"ernst\": \"kritiek\" | \"aandacht\" | \"info\",\n      \"categorie\": \"Vererving\",\n      \"titel\": \"<korte titel, max 80 tekens>\",\n      \"constatering\": \"<wat staat er concreet in de Kadaster-tekst; citeer naam/datum letterlijk waar mogelijk>\",\n      \"juridisch_kader\": \"<korte juridische duiding (1-3 zinnen)>\",\n      \"actie\": \"<concrete vervolgstap voor de behandelaar (1-2 zinnen)>\",\n      \"bronnen\": [\"kadaster\"]\n    }\n  ]\n}\n\nErnstniveaus:\n- 'kritiek' = blokkerend voor passeren (bv. een rechthebbende is overleden; onverdeelde nalatenschap).\n- 'aandacht' = behandelaar moet verifiëren of stuk opvragen (bv. mogelijke saisine, ontbrekende verklaring van erfrecht).\n- 'info' = ter informatie (bv. recent ingeschreven verklaring van erfrecht zonder vervolgactie).\n\nSignalen om te zoeken in de Kadaster-tekst (NIET-uitputtend):\n- 'Overleden' / 'overl.' / '†' achter een naam\n- Een sterfdatum (datum van overlijden) bij een rechthebbende\n- 'weduwe van' / 'weduwnaar van'\n- Inschrijving 'verklaring van erfrecht' of 'akte van verdeling'\n- Recht van vruchtgebruik op grond van wettelijke verdeling (art. 4:13 BW)\n- Een rechthebbende in een onverdeelde gemeenschap zonder akte van verdeling\n\nJuridische ankers (om aan te halen in 'juridisch_kader' waar relevant):\n- Art. 4:182 BW (saisine: erfgenamen treden van rechtswege in de plaats van de erflater)\n- Art. 4:13 BW (wettelijke verdeling; vruchtgebruik langstlevende echtgenoot)\n- Art. 3:166 BW (gemeenschap; beheer/beschikking)\n- Verklaring van erfrecht (art. 4:188 BW)\n\nStrikte regels:\n- Verzin niets. Alleen flaggen bij een concreet tekstueel signaal. Bij geen aanwijzingen: geef `{\"aandachtspunten\": []}`.\n- Maximaal 4 aandachtspunten. Eén per onderwerp.\n- Citeer in 'constatering' letterlijke tekst tussen aanhalingstekens waar mogelijk.\n- Wijzig het veld 'categorie' niet — laat het altijd 'Vererving'.\n- Het veld 'bronnen' is altijd `[\"kadaster\"]`.\n\nINPUT:\n\n=== KADASTER MARKDOWN ===\n{{kadaster_markdown}}\n",
@@ -23,7 +23,7 @@
       "uploaded_by": "system",
       "model_code": "HYRABO00",
       "model_version": "H1-2018 (01-09-2018)",
-      "extraction_prompt": "Je bent een data-extractie assistent voor een notariskantoor.\nGeef ALLEEN geldige JSON terug. Geen markdown, geen extra tekst.\n\nExtraheer uit deze Rabobank passeeropdracht markdown naar JSON met velden:\n- ech_zaaknummer\n- inschrijvingsbedrag_cijfer\n- inschrijvingsbedrag_woorden\n- opslag_cijfer\n- opslag_woorden\n- totaal_hypotheek_cijfer\n- totaal_hypotheek_woorden\n- onderpand_straat\n- onderpand_huisnummer\n- onderpand_postcode\n- onderpand_woonplaats\n- modelakte_code\n- klanten[] met: naam_hoofdletters, voornamen, nationaliteit\n\nMarkdown:\n{{markdown}}",
+      "extraction_prompt": "Je bent een data-extractie assistent voor een notariskantoor.\nGeef ALLEEN geldige JSON terug. Geen markdown, geen extra tekst.\n\nExtraheer uit deze Rabobank passeeropdracht markdown naar JSON met velden:\n- ech_zaaknummer\n- inschrijvingsbedrag_cijfer\n- inschrijvingsbedrag_woorden\n- opslag_cijfer\n- opslag_woorden\n- totaal_hypotheek_cijfer\n- totaal_hypotheek_woorden\n- onderpand_straat\n- onderpand_huisnummer\n- onderpand_postcode\n- onderpand_woonplaats\n- modelakte_code\n- klanten[] met: naam_hoofdletters, voornamen, nationaliteit, geboortedatum (exact zoals in de tekst, formaat DD-MM-JJJJ)\n\nMarkdown:\n{{markdown}}",
       "placeholders": {
         "<<ECH_ZAAKNUMMER>>": [
           "bank.ech_zaaknummer"
@@ -78,49 +78,72 @@
           "kadaster.kadastrale_grootte_woorden"
         ],
         "<<NAAM_1_HOOFDLETTERS>>": [
+          "brp.klanten[0].naam_hoofdletters",
           "kadaster.klanten[0].naam_hoofdletters",
           "bank.klanten[0].naam_hoofdletters"
         ],
         "<<VOORNAMEN_1>>": [
+          "brp.klanten[0].voornamen",
           "kadaster.klanten[0].voornamen",
           "bank.klanten[0].voornamen"
         ],
         "<<GEBOORTEDAG_1_WOORDEN>>": [
+          "brp.klanten[0].geboortedatum_dag_woorden",
           "kadaster.klanten[0].geboortedatum_dag_woorden"
         ],
         "<<GEBOORTEMAAND_1_WOORDEN>>": [
+          "brp.klanten[0].geboortedatum_maand_woorden",
           "kadaster.klanten[0].geboortedatum_maand_woorden"
         ],
         "<<GEBOORTEJAAR_1_WOORDEN>>": [
+          "brp.klanten[0].geboortedatum_jaar_woorden",
           "kadaster.klanten[0].geboortedatum_jaar_woorden"
         ],
         "<<GEBOORTEPLAATS_1>>": [
+          "brp.klanten[0].geboorteplaats",
           "kadaster.klanten[0].geboorteplaats"
         ],
         "<<NAAM_2_HOOFDLETTERS>>": [
+          "brp.klanten[1].naam_hoofdletters",
           "kadaster.klanten[1].naam_hoofdletters",
           "bank.klanten[1].naam_hoofdletters"
         ],
         "<<VOORNAMEN_2>>": [
+          "brp.klanten[1].voornamen",
           "kadaster.klanten[1].voornamen",
           "bank.klanten[1].voornamen"
         ],
         "<<GEBOORTEDAG_2_WOORDEN>>": [
+          "brp.klanten[1].geboortedatum_dag_woorden",
           "kadaster.klanten[1].geboortedatum_dag_woorden"
         ],
         "<<GEBOORTEMAAND_2_WOORDEN>>": [
+          "brp.klanten[1].geboortedatum_maand_woorden",
           "kadaster.klanten[1].geboortedatum_maand_woorden"
         ],
         "<<GEBOORTEJAAR_2_WOORDEN>>": [
+          "brp.klanten[1].geboortedatum_jaar_woorden",
           "kadaster.klanten[1].geboortedatum_jaar_woorden"
         ],
         "<<GEBOORTEPLAATS_2>>": [
+          "brp.klanten[1].geboorteplaats",
           "kadaster.klanten[1].geboorteplaats"
+        ],
+        "<<GEBOORTEDATUM_1_RAW>>": [
+          "brp.klanten[0].geboortedatum",
+          "kadaster.klanten[0].geboortedatum",
+          "bank.klanten[0].geboortedatum"
+        ],
+        "<<GEBOORTEDATUM_2_RAW>>": [
+          "brp.klanten[1].geboortedatum",
+          "kadaster.klanten[1].geboortedatum",
+          "bank.klanten[1].geboortedatum"
         ]
       },
       "conditional_blocks": {
         "client_2": [
-          "kadaster.klanten[1].naam_hoofdletters"
+          "kadaster.klanten[1].naam_hoofdletters",
+          "bank.klanten[1].naam_hoofdletters"
         ]
       }
     },
@@ -296,5 +319,10 @@
     "specialist_burgerlijke_bank": 10000,
     "specialist_burgerlijke_kadaster": 26000,
     "specialist_burgerlijke_analyse_combined": 26000
-  }
+  },
+  "clausule_vergelijking_prompt": "Je bent een ervaren kandidaat-notaris die controleert of een akte van levering juridisch volledig is opgesteld op basis van het brondocument (bijvoorbeeld de koopovereenkomst of een eerdere akte).\n\nJe taak: haal ALLE bedingen, bepalingen en voorwaarden uit het BRONDOCUMENT en controleer per beding of het inhoudelijk correct is overgenomen in de AKTE VAN LEVERING.\n\nGeef ALLEEN geldige JSON terug. Geen markdown, geen codefence, geen tekst buiten de JSON. Begin direct met {. Antwoord in het Nederlands.\n\nSchema:\n{\n  \"bedingen\": [\n    {\n      \"id\": \"<korte slug>\",\n      \"titel\": \"<korte omschrijving van het beding, max 80 tekens>\",\n      \"status\": \"overgenomen | gewijzigd | ontbreekt\",\n      \"brontekst\": \"<letterlijke of samengevatte passage uit het brondocument>\",\n      \"aktetekst\": \"<corresponderende passage uit de akte van levering, of leeg als afwezig>\",\n      \"toelichting\": \"<1-2 zinnen: waarom deze status; bij gewijzigd/ontbreekt het concrete verschil>\"\n    }\n  ]\n}\n\nStatusdefinities:\n- 'overgenomen' = het beding staat inhoudelijk gelijkwaardig in de akte van levering (formulering mag afwijken, strekking is identiek).\n- 'gewijzigd' = het beding staat in de akte maar wijkt inhoudelijk af (andere bedragen, termijnen, partijen, of een afgezwakte/aangescherpte verplichting).\n- 'ontbreekt' = het beding uit het brondocument is niet terug te vinden in de akte van levering.\n\nVoorbeelden van bedingen om op te letten: kettingbeding, kwalitatieve verplichting, boetebeding, erfdienstbaarheden, kwijting koopsom, bijzondere lasten en beperkingen, ontbindende voorwaarden, garanties, asbest-/ouderdomsclausule, voorkeursrecht, gedoogplichten.\n\nRegels:\n- Verzin geen bedingen die niet in het brondocument staan.\n- Beoordeel inhoud, niet de exacte bewoording: een anders geformuleerd maar inhoudelijk gelijk beding is 'overgenomen'.\n- Citeer in 'brontekst' en 'aktetekst' waar mogelijk letterlijk.\n- Geef alle bedingen; sorteer niet zelf.\n\nINPUT:\n\n=== BRONDOCUMENT ===\n{{bron_markdown}}\n\n=== AKTE VAN LEVERING ===\n{{akte_markdown}}\n",
+  "spelling_filter_prompt": "Je bent een Nederlandse corrector voor notariële akten. Hieronder staat een lijst met woorden die een automatische spellingscontrole als 'onbekend' markeerde, met hun context. De lijst bevat veel VALSE POSITIEVEN: juridisch vakjargon, eigennamen van personen, plaatsnamen, straatnamen, kadastrale aanduidingen, afkortingen en correcte samenstellingen die het woordenboek niet kent.\n\nJe taak: behoud ALLEEN de woorden die een ECHTE spelfout zijn en geef per fout de beste correctie.\n\nGeef ALLEEN geldige JSON terug. Geen markdown, geen codefence, geen tekst buiten de JSON. Begin direct met {. Antwoord in het Nederlands.\n\nSchema:\n{\n  \"fouten\": [\n    { \"woord\": \"<het verkeerd gespelde woord, exact zoals in de lijst>\", \"suggestie\": \"<de juiste spelling>\", \"context\": \"<de context uit de lijst>\" }\n  ]\n}\n\nRegels:\n- VERWIJDER: eigennamen (personen, bedrijven), plaatsnamen, straatnamen, kadastrale termen (sectie, perceel), juridisch jargon, Latijnse termen, afkortingen, en correcte Nederlandse samenstellingen.\n- VERWIJDER OOK: archaïsche en formele notariële taal en vaste uitdrukkingen die correct zijn maar niet in het woordenboek staan, zoals naamvalsvormen op -e ('ten kantore van', 'ten behoeve van', 'te dien dage') en formele woorden als 'mitsdien', 'blijkens', 'zijnde', 'voornoemde', 'mitsgaders'. Een correctie als 'kantore -> kantoren' of 'behoeve -> behoeven' is FOUT; niet opnemen.\n- BEHOUD: duidelijke typefouten en verkeerd gespelde gewone Nederlandse woorden (bijv. 'hypoteek' -> 'hypotheek', 'teskt' -> 'tekst').\n- Standaard BEHOUDEN: verwijder een kandidaat ALLEEN als je zeker weet dat hij correct is (gewoon Nederlands woord, eigennaam, plaatsnaam, vakterm, of correcte samenstelling). Bij twijfel: WÉL als spelfout melden — liever een onterechte melding dan een gemiste spelfout.\n- Gebruik bij voorkeur een van de meegegeven suggesties als die juist is.\n- Als er geen echte spelfouten zijn, geef: {\"fouten\": []}.\n\nKANDIDATEN:\n{{kandidaten}}\n",
+  "clausule_extractie_prompt": "Je bent een notarieel jurist. Hieronder staat een BRONDOCUMENT.\n\nTAAK: haal ELK los beding/bepaling eruit (o.a. erfdienstbaarheden, kettingbedingen, kwalitatieve verplichtingen, bijzondere lasten en beperkingen, kwijting koopsom, ontbindende voorwaarden, garanties, boetebeding, gedoogplichten).\n\nANTWOORD UITSLUITEND met geldige JSON in EXACT deze structuur, geen andere sleutels, geen markdown, geen tekst eromheen:\n{\"bedingen\":[{\"id\":\"<korte slug>\",\"titel\":\"<KORT label, max 60 tekens>\",\"brontekst\":\"<letterlijk citaat van het beding>\"}]}\n\nVOORBEELD:\n{\"bedingen\":[{\"id\":\"erfdienstbaarheid-uitweg\",\"titel\":\"Erfdienstbaarheid van in- en uitgang\",\"brontekst\":\"de erfdienstbaarheid van in- en uitgang van en naar de openbare straat ...\"}]}\n\nREGELS:\n- Verzin geen bedingen; gebruik alleen wat in de tekst staat.\n- Elk item is een OBJECT met de sleutels id, titel, brontekst.\n- 'titel' is een KORT label, NIET de volledige bepaling; de volledige tekst hoort in 'brontekst'.\n- Geef ALLE bedingen uit de bron.\n\n=== BRONDOCUMENT ===\n{{bron_markdown}}\n\nHerhaal: antwoord UITSLUITEND met {\"bedingen\":[{...}]}.",
+  "clausule_classificatie_prompt": "Je bent een notarieel jurist. Hieronder staan BEDINGEN uit een brondocument, en daarna een AKTE VAN LEVERING.\n\nTAAK: bepaal voor ELK gegeven beding of het INHOUDELIJK in de akte van levering terugkomt.\n\nANTWOORD UITSLUITEND met geldige JSON in EXACT deze structuur:\n{\"bedingen\":[{\"id\":\"<id van het beding>\",\"titel\":\"<titel van het beding>\",\"status\":\"overgenomen|gewijzigd|ontbreekt\",\"aktetekst\":\"<citaat uit de akte of leeg>\",\"toelichting\":\"<1-2 zinnen>\"}]}\n\nSTATUS (exact een van):\n- overgenomen = het beding staat inhoudelijk gelijkwaardig in de akte (formulering mag afwijken).\n- gewijzigd = aanwezig maar inhoudelijk afwijkend.\n- ontbreekt = niet specifiek terug te vinden in de akte.\n\nREGELS:\n- Een algemene verwijzing in de akte ('aanvaardt alle erfdienstbaarheden') telt NIET als concrete overname van een specifiek beding -> 'ontbreekt' of 'gewijzigd'.\n- Behandel ELK gegeven beding precies een keer; gebruik dezelfde id en titel.\n- Verzin geen gegevens.\n\n=== BEDINGEN (uit het brondocument) ===\n{{bedingen}}\n\n=== AKTE VAN LEVERING ===\n{{akte_markdown}}\n\nHerhaal: antwoord UITSLUITEND met {\"bedingen\":[...]} en geef per beding een status.",
+  "brp_extraction_prompt": "Je bent een data-extractie assistent voor een notariskantoor.\nGeef ALLEEN geldige JSON terug. Geen markdown, geen extra tekst.\nBegin direct met { — geen inleidende zin of codefence.\n\nExtraheer uit deze BRP (Basisregistratie Personen) inzage de persoonsgegevens naar JSON met veld:\n- klanten[] met: naam_hoofdletters, volledige_naam, voornamen, tussenvoegsel, achternaam, geboortedatum_dag_woorden, geboortedatum_maand_woorden, geboortedatum_jaar_woorden, geboorteplaats, geboorteland, nationaliteit\n\nRegels:\n- Gebruik de EIGEN geslachtsnaam van de ingeschrevene (veld 'Geslachtsnaam'), NIET de naam van de partner/echtgenoot.\n- volledige_naam = voornamen + (tussenvoegsel +) geslachtsnaam, bijv. \"Anna Alida de Klerk\".\n- naam_hoofdletters = volledige_naam volledig in HOOFDLETTERS, bijv. \"ANNA ALIDA DE KLERK\".\n- voornamen = alle voornamen VOLUIT (niet de initialen).\n- tussenvoegsel = het voorvoegsel (bijv. \"de\", \"van\", \"van der\"); leeg als er geen is.\n- achternaam = de geslachtsnaam zonder voorvoegsel.\n- De geboortedatum staat als DD-MM-JJJJ. Schrijf dag, maand en jaar VOLUIT in Nederlandse woorden zoals in een notariële akte:\n  - dag: 11 -> \"elf\"\n  - maand: 06 -> \"juni\"\n  - jaar: 1947 -> \"negentienhonderdzevenenveertig\"\n- Neem alleen de hoofdpersoon (de ingeschrevene) op als klant, niet de partner als aparte klant.\n- Als een veld ontbreekt, gebruik \"\".\n\nMarkdown:\n{{markdown}}"
 }

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="geometricPrecision">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0B1220" />
+      <stop offset="100%" stop-color="#08121F" />
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="6" fill="url(#bg)" />
+  <text
+    x="16"
+    y="23"
+    text-anchor="middle"
+    font-family="'Fraunces', Georgia, serif"
+    font-size="22"
+    font-weight="500"
+    fill="#FAF7F1">S</text>
+  <circle cx="24" cy="9" r="2" fill="#C9963F" />
+</svg>

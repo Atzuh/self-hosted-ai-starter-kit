@@ -1,6 +1,8 @@
 .env
-shared/rag-files/pending/*
-!shared/rag-files/pending/.gitkeep
-shared/rag-files/processed/*
-!shared/rag-files/processed/.gitkeep
 n8n/demo-data/.imported
+
+# KNB-modellen zijn auteursrechtelijk beschermd — niet committen.
+# Mapstructuur en README blijven wel versiebeheerd.
+bank-models/**/*.docx
+bank-models/**/*.doc
+bank-models/**/*.pdf

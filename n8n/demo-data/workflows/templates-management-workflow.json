@@ -1,0 +1,168 @@
+{
+  "name": "Templates Beheer",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "templates",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "1c4b9aaf-1111-4fa0-9aaa-templates0001",
+      "name": "Webhook GET templates",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        140
+      ],
+      "webhookId": "templates-list-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\n\nlet registry;\ntry {\n  registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));\n} catch (err) {\n  return [{\n    json: {\n      success: false,\n      error: `Kon registry niet lezen: ${err.message}`,\n      banks: []\n    }\n  }];\n}\n\nconst banks = Object.entries(registry.banks || {}).map(([bankId, b]) => {\n  const templateFilename = b.template_filename || null;\n  const templatePath = templateFilename\n    ? `/data/shared/templates/${bankId}/${templateFilename}`\n    : null;\n  let fileExists = false;\n  let fileSize = null;\n  let fileMtime = null;\n  if (templatePath) {\n    try {\n      const stat = fs.statSync(templatePath);\n      fileExists = true;\n      fileSize = stat.size;\n      fileMtime = stat.mtime.toISOString();\n    } catch {\n      fileExists = false;\n    }\n  }\n  return {\n    bank_id: bankId,\n    display_name: b.display_name || bankId,\n    keywords: b.keywords || [],\n    template_filename: templateFilename,\n    uploaded_at: b.uploaded_at || null,\n    uploaded_by: b.uploaded_by || null,\n    file_exists: fileExists,\n    file_size: fileSize,\n    file_mtime: fileMtime,\n    placeholder_count: Object.keys(b.placeholders || {}).length\n  };\n});\n\nreturn [{\n  json: {\n    success: true,\n    schema_version: registry.schema_version || 1,\n    banks\n  }\n}];"
+      },
+      "id": "2c4b9aaf-2222-4fa0-9aaa-templates0002",
+      "name": "Read Registry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -170,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "3c4b9aaf-3333-4fa0-9aaa-templates0003",
+      "name": "Respond GET",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        90,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "upload-template",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "4c4b9aaf-4444-4fa0-9aaa-templates0004",
+      "name": "Webhook POST upload",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        420
+      ],
+      "webhookId": "templates-upload-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst path = require('path');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\nconst TEMPLATES_DIR = '/data/shared/templates';\n\n// Verwacht multipart-form-data: bank_id (text field) + file (binary, .docx)\nconst body = $json.body || $json || {};\nconst bankId = String(body.bank_id || '').trim();\nconst uploadedBy = String(body.uploaded_by || 'webapp').trim() || 'webapp';\n\nif (!bankId) {\n  throw new Error('Veld \\'bank_id\\' ontbreekt in form data.');\n}\nif (!/^[a-z0-9_-]+$/i.test(bankId)) {\n  throw new Error(`Ongeldig bank_id: '${bankId}'. Alleen letters/cijfers/-/_ toegestaan.`);\n}\n\nconst binaries = $binary || {};\nconst binKeys = Object.keys(binaries);\nlet binEntry = binaries.file || binaries.template || (binKeys.length === 1 ? binaries[binKeys[0]] : null);\nif (!binEntry) {\n  for (const k of binKeys) {\n    const fn = String(binaries[k]?.fileName || '').toLowerCase();\n    if (fn.endsWith('.docx')) { binEntry = binaries[k]; break; }\n  }\n}\nif (!binEntry) {\n  throw new Error(\n    `Geen .docx-bestand gevonden in upload. Binary keys: ${binKeys.join(', ') || '(geen)'}.`\n  );\n}\n\nconst originalName = String(binEntry.fileName || 'template.docx');\nif (!originalName.toLowerCase().endsWith('.docx')) {\n  throw new Error(`Alleen .docx-bestanden zijn toegestaan. Ontvangen: ${originalName}`);\n}\n\n// Sanitize filename — voorkom path traversal.\nconst safeName = path.basename(originalName).replace(/[^A-Za-z0-9._-]/g, '_');\nif (!safeName.toLowerCase().endsWith('.docx')) {\n  throw new Error(`Bestandsnaam niet bruikbaar na sanitization: '${safeName}'`);\n}\n\n// Lees registry, valideer bank.\nlet registry;\ntry {\n  registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));\n} catch (err) {\n  throw new Error(`Kon registry niet lezen: ${err.message}`);\n}\nconst banks = registry.banks || {};\nif (!banks[bankId]) {\n  const known = Object.keys(banks).join(', ') || '(geen)';\n  throw new Error(\n    `Bank '${bankId}' is niet bekend in registry.json. ` +\n    `Bekende banken: ${known}. Vraag een ontwikkelaar deze toe te voegen.`\n  );\n}\n\n// Schrijf het bestand.\nconst targetDir = path.join(TEMPLATES_DIR, bankId);\nfs.mkdirSync(targetDir, { recursive: true });\nconst targetPath = path.join(targetDir, safeName);\n\n// In n8n is binEntry.data base64-gecodeerd.\nlet buffer;\nif (binEntry.data) {\n  buffer = Buffer.from(binEntry.data, 'base64');\n} else if (binEntry.binaryData) {\n  buffer = Buffer.from(binEntry.binaryData, 'base64');\n} else {\n  throw new Error('Binary entry bevat geen \\'data\\'-veld om te schrijven.');\n}\nfs.writeFileSync(targetPath, buffer);\n\n// Update registry.\nconst now = new Date().toISOString();\nbanks[bankId].template_filename = safeName;\nbanks[bankId].uploaded_at = now;\nbanks[bankId].uploaded_by = uploadedBy;\nfs.writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2) + '\\n', 'utf8');\n\nreturn [{\n  json: {\n    success: true,\n    bank_id: bankId,\n    display_name: banks[bankId].display_name || bankId,\n    template_filename: safeName,\n    template_path: targetPath,\n    file_size: buffer.length,\n    uploaded_at: now,\n    uploaded_by: uploadedBy\n  }\n}];"
+      },
+      "id": "5c4b9aaf-5555-4fa0-9aaa-templates0005",
+      "name": "Save Uploaded Template",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -170,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "6c4b9aaf-6666-4fa0-9aaa-templates0006",
+      "name": "Respond POST",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        90,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook GET templates": {
+      "main": [
+        [
+          {
+            "node": "Read Registry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Registry": {
+      "main": [
+        [
+          {
+            "node": "Respond GET",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook POST upload": {
+      "main": [
+        [
+          {
+            "node": "Save Uploaded Template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Uploaded Template": {
+      "main": [
+        [
+          {
+            "node": "Respond POST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b2c30ff3-67f5-4daa-b227-templates00099",
+  "meta": {
+    "instanceId": "self-hosted-ai-starter-kit"
+  },
+  "id": "templates-management"
+}

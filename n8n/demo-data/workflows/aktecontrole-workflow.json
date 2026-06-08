@@ -1,0 +1,599 @@
+{
+  "name": "Aktecontrole",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "akte-controle",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ac000000-0001-4000-aaaa-aktecontr0001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        200
+      ],
+      "webhookId": "aktecontrole-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aktecontrole: classificeer geuploade bestanden op veldnaam-prefix.\n//   akte_* -> role 'akte' (akte van levering)\n//   bron_* -> role 'bron' (brondocument)\n// Bouwt per bestand een Docling-item (base64). Vereist minstens één van elke rol.\nconst webhookItem = $input.first();\nconst b = (webhookItem && webhookItem.binary) || {};\nconst keys = Object.keys(b);\n\nif (keys.length === 0) {\n  throw new Error(\n    'Webhook ontving geen binary bestanden. Stuur de akte van levering (veld akte_*) en het brondocument (veld bron_*) als multipart/form-data mee.'\n  );\n}\n\nfunction isConvertibleDoc(k) {\n  const fn = String(b[k]?.fileName || '').toLowerCase();\n  const mime = String(b[k]?.mimeType || '').toLowerCase();\n  if (fn.endsWith('.pdf') || mime.includes('pdf')) return true;\n  if (fn.endsWith('.docx')) return true;\n  if (mime.includes('wordprocessingml') || mime.includes('officedocument.wordprocessingml')) return true;\n  return false;\n}\n\nfunction roleForKey(k) {\n  const lk = String(k).toLowerCase();\n  if (lk.startsWith('akte')) return 'akte';\n  if (lk.startsWith('bron')) return 'bron';\n  return null;\n}\n\nasync function loadAsBase64(binaryKey) {\n  const buffer = await this.helpers.getBinaryDataBuffer(0, binaryKey);\n  return buffer.toString('base64');\n}\n\nconst docKeys = keys.filter(isConvertibleDoc);\nif (docKeys.length === 0) {\n  throw new Error('Geen ondersteunde documenten (PDF of .docx) in de upload.');\n}\n\nconst roles = new Set();\nconst out = [];\nfor (const k of docKeys) {\n  const role = roleForKey(k);\n  if (!role) continue; // negeer onbekende velden\n  roles.add(role);\n  const blob = await loadAsBase64.call(this, k);\n  out.push({\n    json: {\n      role,\n      filename: b[k]?.fileName || `${k}.pdf`,\n      base64_string: blob,\n      receivedAt: new Date().toISOString(),\n    },\n  });\n}\n\nif (!roles.has('akte')) {\n  throw new Error(\"Geen 'akte van levering' ontvangen. Upload het bestand in een veld dat begint met 'akte' (akte_0, akte_1, ...).\");\n}\nif (!roles.has('bron')) {\n  throw new Error(\"Geen 'brondocument' ontvangen. Upload het bestand in een veld dat begint met 'bron' (bron_0, bron_1, ...).\");\n}\n\nreturn out;\n"
+      },
+      "id": "ac000000-0002-4000-aaaa-aktecontr0002",
+      "name": "Split Input Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -20,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://docling:5001/v1/convert/source",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"sources\": [\n    {\n      \"kind\": \"file\",\n      \"filename\": {{ JSON.stringify($json.filename) }},\n      \"base64_string\": {{ JSON.stringify($json.base64_string) }}\n    }\n  ],\n  \"options\": {\n    \"to_formats\": [\"md\"],\n    \"do_ocr\": true\n  }\n}",
+        "options": {
+          "timeout": 600000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "id": "ac000000-0003-4000-aaaa-aktecontr0003",
+      "name": "Docling Convert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        160,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 8000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Per Docling-response: pak de markdown en bewaar role + bestandsnaam.\nconst sourceItem = $('Split Input Files').itemMatching($itemIndex);\nconst role = sourceItem?.json?.role || $json.role || 'overig';\nconst filename = sourceItem?.json?.filename || '';\n\nconst payload = $json;\nlet md = '';\nif (payload?.document?.md_content) md = payload.document.md_content;\nelse if (payload?.md_content) md = payload.md_content;\nelse if (payload?.result?.document?.md_content) md = payload.result.document.md_content;\nelse if (Array.isArray(payload?.documents) && payload.documents[0]?.md_content) md = payload.documents[0].md_content;\n\nif (!md) {\n  throw new Error(`Docling gaf geen md_content terug voor ${filename || role}. Top-level keys: ${Object.keys(payload || {}).join(', ')}`);\n}\n\nreturn { json: { role, filename, markdown: md } };\n"
+      },
+      "id": "ac000000-0004-4000-aaaa-aktecontr0004",
+      "name": "Extract Markdown",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        340,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Splitst de geëxtraheerde markdowns op rol (akte van levering vs brondocument)\n// en bundelt ze tot twee tekstblokken voor de vergelijkings-LLM.\nconst items = $input.all();\nif (!items.length) {\n  throw new Error('Geen markdowns ontvangen voor de aktecontrole.');\n}\n\nconst MAX_PER_DOC = 12000;\nfunction clamp(s, max) {\n  const txt = String(s || '');\n  if (txt.length <= max) return txt;\n  return txt.slice(0, max) + '\\n…[afgekapt voor controle-prompt]';\n}\n\nconst akteDocs = [];\nconst bronDocs = [];\nfor (const it of items) {\n  const j = it.json || {};\n  const entry = { filename: j.filename || '', markdown: clamp(j.markdown || '', MAX_PER_DOC) };\n  if (j.role === 'akte') akteDocs.push(entry);\n  else if (j.role === 'bron') bronDocs.push(entry);\n}\n\nif (akteDocs.length === 0) throw new Error('Geen markdown voor de akte van levering na extractie.');\nif (bronDocs.length === 0) throw new Error('Geen markdown voor het brondocument na extractie.');\n\nfunction joinDocs(list) {\n  return list.map((d, i) => `=== ${d.filename || ('document ' + (i + 1))} ===\\n${d.markdown}`).join('\\n\\n');\n}\n\nconst now = new Date();\nconst zaaknummer = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;\n\nreturn [{\n  json: {\n    akteMarkdown: joinDocs(akteDocs),\n    bronMarkdown: joinDocs(bronDocs),\n    akteFilename: akteDocs.map((d) => d.filename).filter(Boolean).join(', '),\n    bronFilename: bronDocs.map((d) => d.filename).filter(Boolean).join(', '),\n    documentCount: akteDocs.length + bronDocs.length,\n    zaaknummer,\n  },\n}];\n"
+      },
+      "id": "ac000000-0005-4000-aaaa-aktecontr0005",
+      "name": "Aggregate Inputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Schrijf de akte-markdown naar een tijdelijk JSON-bestand voor\n// controleer_spelling.py (zelfopruimend: script verwijdert het na inlezen).\nconst fs = require('fs');\nconst execId = String($execution.id || 'single').replace(/[^0-9A-Za-z_-]/g, '_').slice(0, 32);\nconst argsFile = `/tmp/n8n_args_spelling_${execId}_${Date.now()}.json`;\nconst agg = $('Aggregate Inputs').first()?.json || {};\nfs.writeFileSync(argsFile, JSON.stringify({ akteMarkdown: String(agg.akteMarkdown || '') }), 'utf8');\nreturn { json: { ...$json, argsFile } };\n"
+      },
+      "id": "ac000000-0010-4000-aaaa-aktecontr0010",
+      "name": "Write Akte Args",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2140,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=python3 /data/shared/controleer_spelling.py --args-file '{{ $json.argsFile }}'"
+      },
+      "id": "ac000000-0011-4000-aaaa-aktecontr0011",
+      "name": "Detecteer Spelling",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse de stdout van controleer_spelling.py: 'SUCCESS: <json-array>'.\nconst cmd = $('Detecteer Spelling').first()?.json || {};\nconst stdout = String(cmd.stdout || '');\nconst stderr = String(cmd.stderr || '');\n\nlet arr = [];\nconst m = stdout.match(/SUCCESS:\\s*([\\s\\S]+)$/);\nconst jsonText = (m ? m[1] : stdout).trim();\ntry {\n  const p = JSON.parse(jsonText);\n  if (Array.isArray(p)) arr = p;\n} catch (e) {\n  // Geen bruikbare output: ga verder met lege kandidatenlijst.\n}\n\nreturn [{\n  json: {\n    candidates: arr,\n    candidateCount: arr.length,\n    spelling_warning: arr.length === 0 && stderr ? stderr.slice(0, 200) : null,\n  },\n}];\n"
+      },
+      "id": "ac000000-0012-4000-aaaa-aktecontr0012",
+      "name": "Parse Spelling Candidates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2500,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Bouwt de prompt die het LLM gebruikt om valse positieven uit de\n// spellchecker-kandidaten te filteren.\nconst fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\n\nlet registry;\ntry {\n  registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));\n} catch (err) {\n  throw new Error(`Kon templates-registry niet lezen (${REGISTRY_PATH}): ${err.message}`);\n}\n\nconst basePrompt = String(registry.spelling_filter_prompt || '');\nif (!basePrompt) {\n  throw new Error('registry.json mist spelling_filter_prompt.');\n}\n\nconst candidates = Array.isArray($json.candidates) ? $json.candidates : [];\nconst lijst = candidates.map((c, i) => {\n  const sug = Array.isArray(c.suggesties) ? c.suggesties.join(', ') : '';\n  const ctx = String(c.context || '').replace(/\"/g, \"'\");\n  return `${i + 1}. woord: \"${c.woord}\" | context: \"${ctx}\" | suggesties: ${sug || '(geen)'}`;\n}).join('\\n') || '(geen kandidaten)';\n\nconst chatInput = basePrompt.split('{{kandidaten}}').join(lijst);\n\nreturn [{ json: { chatInput, candidateCount: candidates.length } }];\n"
+      },
+      "id": "ac000000-0013-4000-aaaa-aktecontr0013",
+      "name": "Build Spelling-Filter Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2680,
+        200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "ac000000-0014-4000-aaaa-aktecontr0014",
+      "name": "Spelling Filter LLM Chain",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        2860,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "model": "mistral:7b-instruct",
+        "options": {
+          "temperature": 0,
+          "format": "json",
+          "numCtx": 8192
+        }
+      },
+      "id": "ac000000-0015-4000-aaaa-aktecontr0015",
+      "name": "Spelling Filter Ollama Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        2860,
+        20
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "xHuYe0MDGOs9IpBW",
+          "name": "Local Ollama service"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function extractText(j) {\n  if (!j || typeof j !== 'object') return '';\n  if (typeof j.text === 'string' && j.text) return j.text;\n  if (typeof j.output === 'string' && j.output) return j.output;\n  if (typeof j.answer === 'string' && j.answer) return j.answer;\n  if (typeof j.response === 'string' && j.response) return j.response;\n  if (typeof j?.message?.content === 'string' && j.message.content) return j.message.content;\n  return '';\n}\nfunction unwrapJsonLike(s) {\n  let t = String(s || '').trim();\n  const fence = /^```(?:json)?\\s*\\r?\\n?([\\s\\S]*?)\\r?\\n?```$/im;\n  const m = t.match(fence);\n  if (m) return m[1].trim();\n  if (t.startsWith('```')) {\n    t = t.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/i, '');\n  }\n  return t.trim();\n}\nfunction parseLlmObject(node) {\n  const raw = extractText(node).trim();\n  if (raw) {\n    try { const p = JSON.parse(unwrapJsonLike(raw)); if (p && typeof p === 'object') return p; } catch {}\n    const m = raw.match(/\\{[\\s\\S]*\\}/);\n    if (m) { try { return JSON.parse(m[0]); } catch {} }\n  }\n  return null;\n}\nfunction unwrapWrappers(parsed, keys) {\n  const WRAP = new Set(keys);\n  let depth = 0;\n  while (\n    parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&\n    Object.keys(parsed).length === 1 && WRAP.has(Object.keys(parsed)[0]) && depth < 3\n  ) {\n    parsed = parsed[Object.keys(parsed)[0]];\n    depth++;\n  }\n  return parsed;\n}\n\nconst node = $input.all()[0]?.json || {};\nlet parsed = parseLlmObject(node);\nif (!parsed && Array.isArray(node.fouten)) parsed = node;\nif (!parsed || typeof parsed !== 'object') parsed = { fouten: [] };\nparsed = unwrapWrappers(parsed, ['result', 'data', 'response', 'output', 'spelling']);\n\nconst rawList = Array.isArray(parsed.fouten)\n  ? parsed.fouten\n  : (Array.isArray(parsed) ? parsed : []);\n\nconst fouten = rawList.map((f) => ({\n  woord: String(f?.woord || ''),\n  suggestie: String(f?.suggestie || ''),\n  context: String(f?.context || ''),\n})).filter((f) => f.woord);\n\nreturn [{ json: { spelling: { fouten, count: fouten.length } } }];\n"
+      },
+      "id": "ac000000-0016-4000-aaaa-aktecontr0016",
+      "name": "Parse Spelling JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3040,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combineert de vergelijking en de spellingscontrole tot de webhook-respons.\nconst comp = $('Parse Comparison JSON').first()?.json?.comparison\n  || { bedingen: [], counts: { overgenomen: 0, gewijzigd: 0, ontbreekt: 0, totaal: 0 } };\nconst spelling = $('Parse Spelling JSON').first()?.json?.spelling\n  || { fouten: [], count: 0 };\nconst meta = $('Aggregate Inputs').first()?.json || {};\n\n// Deterministische check: kwijting/kwitantie telt alleen mee als die direct\n// onder een kopje 'Koopprijs' of 'Kwijting'/'Kwitantie' staat. Koppen worden\n// herkend als markdown-ATX (## Titel), volledig vetgedrukte regels (**Titel**)\n// of korte ALL-CAPS-regels zonder zinseinde (bv. KOOPPRIJS).\n// We scannen de VOLLEDIGE bron-markdown uit Extract Markdown (vóór de 12k-clamp\n// die alleen voor de LLM-prompts bedoeld is), zodat de check niet wordt beperkt.\nlet bronMarkdown = '';\ntry {\n  bronMarkdown = $('Extract Markdown').all()\n    .filter((it) => it.json?.role === 'bron')\n    .map((it) => String(it.json?.markdown || ''))\n    .join('\\n\\n');\n} catch (e) {\n  bronMarkdown = '';\n}\nif (!bronMarkdown) bronMarkdown = String(meta.bronMarkdown || '');\n\nconst TERM = /kwijting|kwitantie/i;\nconst HEADING_TERM = /koopprijs|kwijting|kwitantie/i;\nfunction headingText(line) {\n  const t = String(line).trim();\n  if (!t) return null;\n  let m = t.match(/^#{1,6}\\s+(.*)$/);\n  if (m) return m[1].trim();\n  m = t.match(/^\\*\\*(.+?)\\*\\*$/);\n  if (m) return m[1].trim();\n  const letters = t.replace(/[^A-Za-z]/g, '');\n  if (t.length <= 60 && letters.length >= 3 && t === t.toUpperCase() && /[A-Z]/.test(t) && !/[.;,:]$/.test(t)) {\n    return t;\n  }\n  return null;\n}\n\nlet kwijtingGevonden = false;\nlet inSectie = false;\nfor (const line of bronMarkdown.split('\\n')) {\n  const kop = headingText(line);\n  if (kop !== null) {\n    inSectie = HEADING_TERM.test(kop);\n    if (inSectie && TERM.test(kop)) { kwijtingGevonden = true; break; }\n    continue;\n  }\n  if (inSectie && TERM.test(line)) { kwijtingGevonden = true; break; }\n}\nconst brondocument_checks = [{\n  id: 'kwijting',\n  label: 'Kwijting / kwitantie koopsom',\n  gevonden: kwijtingGevonden,\n  toelichting: kwijtingGevonden\n    ? 'Verwijzing naar kwijting of kwitantie aangetroffen in het brondocument.'\n    : 'Geen kwijting of kwitantie aangetroffen in het brondocument.',\n}];\n\nreturn [{\n  json: {\n    success: true,\n    mode: 'aktecontrole',\n    zaaknummer: meta.zaaknummer || '',\n    akte_filename: meta.akteFilename || '',\n    bron_filename: meta.bronFilename || '',\n    comparison: comp,\n    spelling,\n    brondocument_checks,\n  },\n}];\n"
+      },
+      "id": "ac000000-0017-4000-aaaa-aktecontr0017",
+      "name": "Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {}
+      },
+      "id": "ac000000-0018-4000-aaaa-aktecontr0018",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        3400,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Aktecontrole\nControleert of alle bedingen uit het **brondocument** correct zijn overgenomen in de **akte van levering**, plus een hybride spellingscontrole (pyspellchecker NL → LLM-filter).\n\nWebhook: `POST /webhook/akte-controle` met velden `akte_*` en `bron_*`.\nOutput: JSON met `comparison` + `spelling` (alleen inline, geen DOCX).",
+        "height": 260,
+        "width": 360
+      },
+      "id": "ac000000-0019-4000-aaaa-aktecontr0019",
+      "name": "Sticky: aktecontrole",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -200,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Bouwt de extractie-prompt: haal alle bedingen uit het BRONDOCUMENT.\nconst fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\nconst input = $json || {};\nlet registry;\ntry { registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8')); }\ncatch (err) { throw new Error(`Kon templates-registry niet lezen (${REGISTRY_PATH}): ${err.message}`); }\nconst basePrompt = String(registry.clausule_extractie_prompt || '');\nif (!basePrompt) throw new Error('registry.json mist clausule_extractie_prompt.');\nconst chatInput = basePrompt.split('{{bron_markdown}}').join(String(input.bronMarkdown || ''));\nreturn [{ json: { chatInput, zaaknummer: input.zaaknummer, akteFilename: input.akteFilename, bronFilename: input.bronFilename } }];\n"
+      },
+      "id": "ac000000-0020-4000-aaaa-aktecontr0020",
+      "name": "Build Extract Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "ac000000-0021-4000-aaaa-aktecontr0021",
+      "name": "Extract LLM Chain",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "model": "mistral:7b-instruct",
+        "options": {
+          "temperature": 0,
+          "format": "json",
+          "numCtx": 8192
+        }
+      },
+      "id": "ac000000-0022-4000-aaaa-aktecontr0022",
+      "name": "Extract Ollama Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        880,
+        20
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "xHuYe0MDGOs9IpBW",
+          "name": "Local Ollama service"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function extractText(j) {\n  if (!j || typeof j !== 'object') return '';\n  if (typeof j.text === 'string' && j.text) return j.text;\n  if (typeof j.output === 'string' && j.output) return j.output;\n  if (typeof j.answer === 'string' && j.answer) return j.answer;\n  if (typeof j.response === 'string' && j.response) return j.response;\n  if (typeof j?.message?.content === 'string' && j.message.content) return j.message.content;\n  return '';\n}\nfunction unwrapJsonLike(s) {\n  let t = String(s || '').trim();\n  const fence = /^```(?:json)?\\s*\\r?\\n?([\\s\\S]*?)\\r?\\n?```$/im;\n  const m = t.match(fence);\n  if (m) return m[1].trim();\n  if (t.startsWith('```')) t = t.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/i, '');\n  return t.trim();\n}\nfunction parseLlmObject(node) {\n  const raw = extractText(node).trim();\n  if (raw) {\n    try { const p = JSON.parse(unwrapJsonLike(raw)); if (p && typeof p === 'object') return p; } catch {}\n    const m = raw.match(/\\{[\\s\\S]*\\}/);\n    if (m) { try { return JSON.parse(m[0]); } catch {} }\n  }\n  return null;\n}\nfunction unwrapWrappers(parsed, keys) {\n  const WRAP = new Set(keys);\n  let depth = 0;\n  while (parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&\n    Object.keys(parsed).length === 1 && WRAP.has(Object.keys(parsed)[0]) && depth < 3) {\n    parsed = parsed[Object.keys(parsed)[0]]; depth++;\n  }\n  return parsed;\n}\n// Tolerante veld-lezer: accepteert synoniem-sleutels die kleine modellen vaak gebruiken.\nfunction pick(o, keys) {\n  if (!o || typeof o !== 'object') return '';\n  for (const k of keys) {\n    const v = o[k];\n    if (v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)) return v;\n  }\n  return '';\n}\n\nconst node = $input.all()[0]?.json || {};\nlet parsed = parseLlmObject(node);\nif (!parsed && Array.isArray(node.bedingen)) parsed = node;\nif (!parsed || typeof parsed !== 'object') parsed = { bedingen: [] };\nparsed = unwrapWrappers(parsed, ['result', 'data', 'response', 'output', 'bedingen_lijst', 'clausules']);\nlet rawList = Array.isArray(parsed.bedingen) ? parsed.bedingen\n  : (Array.isArray(parsed.clausules) ? parsed.clausules\n  : (Array.isArray(parsed) ? parsed : []));\n\nconst bedingen = rawList.map((b, i) => {\n  if (typeof b === 'string') {\n    return { id: `beding-${i + 1}`, titel: b.slice(0, 80), brontekst: b };\n  }\n  const bron = String(pick(b, ['brontekst', 'tekst', 'citaat', 'inhoud', 'beding', 'clausule', 'bepaling', 'text']) || '');\n  let titel = String(pick(b, ['titel', 'label', 'naam', 'omschrijving', 'onderwerp', 'title']) || '');\n  if (!titel) titel = bron.slice(0, 70) || `Beding ${i + 1}`;\n  const id = String(pick(b, ['id', 'slug', 'nummer']) || `beding-${i + 1}`);\n  return { id, titel: titel.slice(0, 120), brontekst: bron || titel };\n}).filter((b) => b.brontekst);\n\nreturn [{ json: { bedingen } }];\n"
+      },
+      "id": "ac000000-0023-4000-aaaa-aktecontr0023",
+      "name": "Parse Extracted Bedingen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1060,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Bouwt de classificatie-prompt: vergelijk elk geëxtraheerd beding met de akte.\nconst fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\nlet registry;\ntry { registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8')); }\ncatch (err) { throw new Error(`Kon templates-registry niet lezen (${REGISTRY_PATH}): ${err.message}`); }\nconst basePrompt = String(registry.clausule_classificatie_prompt || '');\nif (!basePrompt) throw new Error('registry.json mist clausule_classificatie_prompt.');\n\nconst bedingen = Array.isArray($json.bedingen) ? $json.bedingen : [];\nconst akte = String($('Aggregate Inputs').first()?.json?.akteMarkdown || '');\nconst lijst = bedingen\n  .map((b, i) => `${i + 1}. [${b.id}] ${b.titel} :: ${String(b.brontekst || '').slice(0, 240)}`)\n  .join('\\n') || '(geen bedingen gevonden)';\n\nconst chatInput = basePrompt\n  .split('{{bedingen}}').join(lijst)\n  .split('{{akte_markdown}}').join(akte);\nreturn [{ json: { chatInput } }];\n"
+      },
+      "id": "ac000000-0024-4000-aaaa-aktecontr0024",
+      "name": "Build Classify Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "ac000000-0025-4000-aaaa-aktecontr0025",
+      "name": "Classify LLM Chain",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1420,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "model": "mistral:7b-instruct",
+        "options": {
+          "temperature": 0,
+          "format": "json",
+          "numCtx": 8192
+        }
+      },
+      "id": "ac000000-0026-4000-aaaa-aktecontr0026",
+      "name": "Classify Ollama Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        1420,
+        20
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "xHuYe0MDGOs9IpBW",
+          "name": "Local Ollama service"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function extractText(j) {\n  if (!j || typeof j !== 'object') return '';\n  if (typeof j.text === 'string' && j.text) return j.text;\n  if (typeof j.output === 'string' && j.output) return j.output;\n  if (typeof j.answer === 'string' && j.answer) return j.answer;\n  if (typeof j.response === 'string' && j.response) return j.response;\n  if (typeof j?.message?.content === 'string' && j.message.content) return j.message.content;\n  return '';\n}\nfunction unwrapJsonLike(s) {\n  let t = String(s || '').trim();\n  const fence = /^```(?:json)?\\s*\\r?\\n?([\\s\\S]*?)\\r?\\n?```$/im;\n  const m = t.match(fence);\n  if (m) return m[1].trim();\n  if (t.startsWith('```')) t = t.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/i, '');\n  return t.trim();\n}\nfunction parseLlmObject(node) {\n  const raw = extractText(node).trim();\n  if (raw) {\n    try { const p = JSON.parse(unwrapJsonLike(raw)); if (p && typeof p === 'object') return p; } catch {}\n    const m = raw.match(/\\{[\\s\\S]*\\}/);\n    if (m) { try { return JSON.parse(m[0]); } catch {} }\n  }\n  return null;\n}\nfunction unwrapWrappers(parsed, keys) {\n  const WRAP = new Set(keys);\n  let depth = 0;\n  while (parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&\n    Object.keys(parsed).length === 1 && WRAP.has(Object.keys(parsed)[0]) && depth < 3) {\n    parsed = parsed[Object.keys(parsed)[0]]; depth++;\n  }\n  return parsed;\n}\n// Tolerante veld-lezer: accepteert synoniem-sleutels die kleine modellen vaak gebruiken.\nfunction pick(o, keys) {\n  if (!o || typeof o !== 'object') return '';\n  for (const k of keys) {\n    const v = o[k];\n    if (v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)) return v;\n  }\n  return '';\n}\n\n// Classify-output (status/toelichting) mergen met de geëxtraheerde bedingen\n// (titel/brontekst). Match op id, met index als fallback.\nconst node = $input.all()[0]?.json || {};\nlet parsed = parseLlmObject(node);\nif (!parsed && Array.isArray(node.bedingen)) parsed = node;\nif (!parsed || typeof parsed !== 'object') parsed = { bedingen: [] };\nparsed = unwrapWrappers(parsed, ['result', 'data', 'response', 'output', 'vergelijking', 'comparison']);\nlet clsList = Array.isArray(parsed.bedingen) ? parsed.bedingen : (Array.isArray(parsed) ? parsed : []);\n\nconst extracted = $('Parse Extracted Bedingen').first()?.json?.bedingen || [];\n\nconst byId = {};\nclsList.forEach((c) => {\n  if (c && typeof c === 'object') {\n    const id = String(pick(c, ['id', 'slug', 'nummer']) || '');\n    if (id) byId[id] = c;\n  }\n});\n\nconst ALLOWED = new Set(['overgenomen', 'gewijzigd', 'ontbreekt']);\nconst ALIASES = {\n  correct: 'overgenomen', aanwezig: 'overgenomen', identiek: 'overgenomen', ok: 'overgenomen',\n  afwijkend: 'gewijzigd', anders: 'gewijzigd', aangepast: 'gewijzigd',\n  missing: 'ontbreekt', ontbrekend: 'ontbreekt', afwezig: 'ontbreekt', niet_overgenomen: 'ontbreekt',\n};\n\nconst bedingen = extracted.map((ex, i) => {\n  const c = byId[ex.id] || (typeof clsList[i] === 'object' ? clsList[i] : {}) || {};\n  const s = String(pick(c, ['status', 'oordeel', 'resultaat']) || '').trim().toLowerCase().replace(/\\s+/g, '_');\n  const status = ALLOWED.has(s) ? s : (ALIASES[s] || 'gewijzigd');\n  return {\n    id: ex.id,\n    titel: ex.titel,\n    status,\n    brontekst: ex.brontekst,\n    aktetekst: String(pick(c, ['aktetekst', 'akte', 'aktetext', 'akte_tekst']) || ''),\n    toelichting: String(pick(c, ['toelichting', 'reden', 'uitleg', 'motivatie']) || ''),\n  };\n});\n\nconst ORDER = { ontbreekt: 0, gewijzigd: 1, overgenomen: 2 };\nbedingen.sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9));\n\nreturn [{\n  json: {\n    comparison: {\n      bedingen,\n      counts: {\n        overgenomen: bedingen.filter((x) => x.status === 'overgenomen').length,\n        gewijzigd: bedingen.filter((x) => x.status === 'gewijzigd').length,\n        ontbreekt: bedingen.filter((x) => x.status === 'ontbreekt').length,\n        totaal: bedingen.length,\n      },\n    },\n  },\n}];\n"
+      },
+      "id": "ac000000-0027-4000-aaaa-aktecontr0027",
+      "name": "Parse Comparison JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Split Input Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Input Files": {
+      "main": [
+        [
+          {
+            "node": "Docling Convert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Docling Convert": {
+      "main": [
+        [
+          {
+            "node": "Extract Markdown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Markdown": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Inputs": {
+      "main": [
+        [
+          {
+            "node": "Build Extract Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Akte Args": {
+      "main": [
+        [
+          {
+            "node": "Detecteer Spelling",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detecteer Spelling": {
+      "main": [
+        [
+          {
+            "node": "Parse Spelling Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Spelling Candidates": {
+      "main": [
+        [
+          {
+            "node": "Build Spelling-Filter Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Spelling-Filter Prompt": {
+      "main": [
+        [
+          {
+            "node": "Spelling Filter LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spelling Filter LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Parse Spelling JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spelling Filter Ollama Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Spelling Filter LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Spelling JSON": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Extract Prompt": {
+      "main": [
+        [
+          {
+            "node": "Extract LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Ollama Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Extract LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Parse Extracted Bedingen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Extracted Bedingen": {
+      "main": [
+        [
+          {
+            "node": "Build Classify Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Classify Prompt": {
+      "main": [
+        [
+          {
+            "node": "Classify LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Ollama Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Classify LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Parse Comparison JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Comparison JSON": {
+      "main": [
+        [
+          {
+            "node": "Write Akte Args",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "ac0a1b2c-0000-4000-aaaa-aktecontrole01",
+  "meta": {
+    "instanceId": "self-hosted-ai-starter-kit"
+  },
+  "id": "aktecontrole"
+}
