@@ -24,6 +24,13 @@ import {
 interface MultiFileDropZoneProps {
   files: File[];
   onChange: (files: File[]) => void;
+  /**
+   * "dossier"   — map-first: hele dossiermap uploaden (akte-modus).
+   * "documenten" — bestand-first: losse PDF/Word-documenten uploaden
+   *   (analyse-modus). Het grote klikvlak opent dan direct de
+   *   bestandskiezer; de map-optie blijft beschikbaar als knop.
+   */
+  variant?: "dossier" | "documenten";
 }
 
 interface FileMeta {
@@ -41,6 +48,10 @@ const SLOT_LABEL: Record<string, { title: string; tone: string }> = {
   kadaster: {
     title: "Kadaster eigendomsinformatie",
     tone: "border-azure/40 bg-azure/8 text-azure",
+  },
+  brp: {
+    title: "BRP-inzage",
+    tone: "border-seal/40 bg-seal/10 text-seal-deep",
   },
 };
 
@@ -98,7 +109,12 @@ function dedupeFiles(existing: File[], incoming: File[]): File[] {
   return merged;
 }
 
-export function MultiFileDropZone({ files, onChange }: MultiFileDropZoneProps) {
+export function MultiFileDropZone({
+  files,
+  onChange,
+  variant = "dossier",
+}: MultiFileDropZoneProps) {
+  const isDocsMode = variant === "documenten";
   const [metaMap, setMetaMap] = useState<Map<File, FileMeta>>(new Map());
   const [isDragOver, setIsDragOver] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
@@ -225,6 +241,13 @@ export function MultiFileDropZone({ files, onChange }: MultiFileDropZoneProps) {
 
   const hasFiles = files.length > 0;
 
+  // In document-modus opent het grote klikvlak direct de bestandskiezer
+  // (losse PDF/Word). In dossier-modus opent het de map-kiezer.
+  const openPrimaryPicker = () => {
+    if (isDocsMode) inputRef.current?.click();
+    else folderInputRef.current?.click();
+  };
+
   return (
     <div className="space-y-3">
       <div
@@ -234,13 +257,13 @@ export function MultiFileDropZone({ files, onChange }: MultiFileDropZoneProps) {
         }}
         onDragLeave={() => setIsDragOver(false)}
         onDrop={handleDrop}
-        onClick={() => folderInputRef.current?.click()}
+        onClick={openPrimaryPicker}
         role="button"
         tabIndex={0}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            folderInputRef.current?.click();
+            openPrimaryPicker();
           }
         }}
         className={cn(
@@ -283,6 +306,8 @@ export function MultiFileDropZone({ files, onChange }: MultiFileDropZoneProps) {
             />
           ) : hasFiles ? (
             <UploadCloud className="h-4 w-4" strokeWidth={1.75} />
+          ) : isDocsMode ? (
+            <FileText className="h-7 w-7" strokeWidth={1.5} />
           ) : (
             <Folder className="h-7 w-7" strokeWidth={1.5} />
           )}
@@ -297,42 +322,63 @@ export function MultiFileDropZone({ files, onChange }: MultiFileDropZoneProps) {
           {isScanning
             ? "Dossiermap doorzoeken…"
             : hasFiles
-              ? "Voeg nog meer toe of sleep een andere map"
-              : "Sleep de dossiermap hierheen"}
+              ? isDocsMode
+                ? "Voeg nog meer documenten toe"
+                : "Voeg nog meer toe of sleep een andere map"
+              : isDocsMode
+                ? "Sleep documenten hierheen"
+                : "Sleep de dossiermap hierheen"}
         </div>
 
         {!hasFiles && (
           <p className="mx-auto mb-5 mt-1.5 max-w-md text-[13.5px] leading-relaxed text-ink-soft">
-            Inclusief alle submappen — passeeropdracht, kadaster, BRP/CIR,
-            voorblad. PDF en Word (.docx). We herkennen automatisch wat waar
-            hoort.
+            {isDocsMode
+              ? "Eén of meer losse stukken — bijv. een BRP-inzage, passeeropdracht of kadasterbericht. PDF en Word (.docx). Of upload een hele map."
+              : "Inclusief alle submappen — passeeropdracht, kadaster, BRP/CIR, voorblad. PDF en Word (.docx). We herkennen automatisch wat waar hoort."}
           </p>
         )}
 
         <div className="mt-3 flex items-center justify-center gap-2 text-[11.5px] text-ink-mute">
           <span>of</span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              folderInputRef.current?.click();
-            }}
-            className="inline-flex items-center gap-1.5 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-strong transition-colors hover:border-azure/50 hover:bg-azure-pale/40 hover:text-azure-glow"
-          >
-            <FolderOpen className="h-3.5 w-3.5" strokeWidth={2} />
-            Kies dossiermap…
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              inputRef.current?.click();
-            }}
-            className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface/60 px-3 py-1.5 text-[12.5px] font-medium text-ink-soft transition-colors hover:border-line-strong hover:bg-wash hover:text-ink-strong"
-          >
-            <FileText className="h-3.5 w-3.5" strokeWidth={2} />
-            Losse bestanden…
-          </button>
+          {(() => {
+            const primaryClass =
+              "inline-flex items-center gap-1.5 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-strong transition-colors hover:border-azure/50 hover:bg-azure-pale/40 hover:text-azure-glow";
+            const secondaryClass =
+              "inline-flex items-center gap-1.5 rounded-md border border-line bg-surface/60 px-3 py-1.5 text-[12.5px] font-medium text-ink-soft transition-colors hover:border-line-strong hover:bg-wash hover:text-ink-strong";
+            const filesButton = (
+              <button
+                key="files"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  inputRef.current?.click();
+                }}
+                className={isDocsMode ? primaryClass : secondaryClass}
+              >
+                <FileText className="h-3.5 w-3.5" strokeWidth={2} />
+                Losse bestanden…
+              </button>
+            );
+            const folderButton = (
+              <button
+                key="folder"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  folderInputRef.current?.click();
+                }}
+                className={isDocsMode ? secondaryClass : primaryClass}
+              >
+                <FolderOpen className="h-3.5 w-3.5" strokeWidth={2} />
+                {isDocsMode ? "Hele map…" : "Kies dossiermap…"}
+              </button>
+            );
+            // In document-modus staat de bestand-knop voorop; in
+            // dossier-modus de map-knop.
+            return isDocsMode
+              ? [filesButton, folderButton]
+              : [folderButton, filesButton];
+          })()}
         </div>
       </div>
 
@@ -375,8 +421,13 @@ export function MultiFileDropZone({ files, onChange }: MultiFileDropZoneProps) {
           <ul className="space-y-2">
             {files.map((file) => {
               const meta = metaMap.get(file);
-              const detectedSlot = meta?.classification?.slot ?? null;
-              const slotInfo = detectedSlot ? SLOT_LABEL[detectedSlot] : null;
+              const detectedCategory =
+                meta?.classification?.category ??
+                meta?.classification?.slot ??
+                null;
+              const slotInfo = detectedCategory
+                ? SLOT_LABEL[detectedCategory]
+                : null;
               const isWord = isWordDocxFile(file);
               return (
                 <li

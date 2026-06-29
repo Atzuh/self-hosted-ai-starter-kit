@@ -1,7 +1,17 @@
 export type DocSlot = "bank" | "kadaster";
 
+/**
+ * Documentcategorie voor weergave. Breder dan {@link DocSlot}: bevat ook
+ * "brp" (inzagestukken zoals een BRP-uitdraai). De akte-slotmachinerie
+ * (SmartDropZone) werkt alleen met bank/kadaster via {@link Classification.slot};
+ * "brp" levert daar slot=null op.
+ */
+export type DocCategory = DocSlot | "brp";
+
 export interface Classification {
   slot: DocSlot | null;
+  /** Bredere categorie incl. "brp"; null als niets gedetecteerd. */
+  category: DocCategory | null;
   confidence: number; // 0..1; 0 = geen match, 1 = volledig zekere match
   matched: string[]; // gevonden keywords
 }
@@ -41,11 +51,37 @@ const KADASTER_KEYWORDS = [
   "notarisdossier",
 ];
 
+// Inzagestukken uit de Basisregistratie Personen (BRP-uitdraai / persoonslijst).
+// Termen zijn specifiek genoeg om niet met passeeropdracht/kadaster te botsen.
+const BRP_KEYWORDS = [
+  "brp bevraging",
+  "basisregistratie personen",
+  "burgerservicenummer",
+  "a-nummer",
+  "huwelijk/partnerschap",
+  "huwelijks geschiedenis",
+  "huwelijksgeschiedenis",
+  "partnerschapsgeschiedenis",
+  "datum ontbinding",
+  "reden ontbinding",
+  "datum opneming gba",
+];
+
+function matchesKeyword(lowerText: string, kw: string): boolean {
+  const k = kw.toLowerCase();
+  // Korte codes (bv. "ech") alleen als heel woord matchen — anders vangen
+  // ze deelwoorden af ("ech" zit in "echtgenoot", "recht", "slechts").
+  if (/^[a-z]{2,4}$/.test(k)) {
+    return new RegExp(`\\b${k}\\b`).test(lowerText);
+  }
+  return lowerText.includes(k);
+}
+
 function findMatches(text: string, keywords: string[]): string[] {
   const lower = text.toLowerCase();
   const out: string[] = [];
   for (const kw of keywords) {
-    if (lower.includes(kw.toLowerCase())) out.push(kw);
+    if (matchesKeyword(lower, kw)) out.push(kw);
   }
   return out;
 }
@@ -63,19 +99,33 @@ export function classifyFileName(filename: string): Classification {
 export function classifyText(text: string): Classification {
   const bankMatched = findMatches(text, BANK_KEYWORDS);
   const kadasterMatched = findMatches(text, KADASTER_KEYWORDS);
+  const brpMatched = findMatches(text, BRP_KEYWORDS);
 
   const bankScore = bankMatched.length;
   const kadasterScore = kadasterMatched.length;
-  const total = bankScore + kadasterScore;
+  const brpScore = brpMatched.length;
+  const total = bankScore + kadasterScore + brpScore;
 
   if (total === 0) {
-    return { slot: null, confidence: 0, matched: [] };
+    return { slot: null, category: null, confidence: 0, matched: [] };
+  }
+
+  // BRP-inzagestukken eerst: hun termen zijn distinctief, dus winnen ze
+  // bij gelijke of hogere score. category="brp" → slot=null (geen akte-slot).
+  if (brpScore > 0 && brpScore >= bankScore && brpScore >= kadasterScore) {
+    return {
+      slot: null,
+      category: "brp",
+      confidence: brpScore / total,
+      matched: brpMatched,
+    };
   }
 
   if (bankScore === kadasterScore) {
-    // Gelijkstand: niet beslissend
+    // Gelijkstand tussen bank en kadaster: niet beslissend
     return {
       slot: null,
+      category: null,
       confidence: 0,
       matched: [...bankMatched, ...kadasterMatched],
     };
@@ -84,12 +134,14 @@ export function classifyText(text: string): Classification {
   if (bankScore > kadasterScore) {
     return {
       slot: "bank",
+      category: "bank",
       confidence: bankScore / total,
       matched: bankMatched,
     };
   }
   return {
     slot: "kadaster",
+    category: "kadaster",
     confidence: kadasterScore / total,
     matched: kadasterMatched,
   };

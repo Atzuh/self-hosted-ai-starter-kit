@@ -459,6 +459,7 @@ export function AkteGenerator() {
               <MultiFileDropZone
                 files={analyseFiles}
                 onChange={setAnalyseFiles}
+                variant="documenten"
               />
             )}
           </Panel>

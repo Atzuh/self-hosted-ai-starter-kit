@@ -1,3 +1,5 @@
+name: scriptor
+
 volumes:
   n8n_storage:
   postgres_storage:
