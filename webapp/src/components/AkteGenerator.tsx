@@ -23,6 +23,7 @@ import { JuridischeAnalyse } from "@/components/JuridischeAnalyse";
 import type { JuridischeAnalyseData } from "@/components/JuridischeAnalyse";
 import { cn } from "@/lib/utils";
 import { dedupeFilesForUpload } from "@/lib/dedupe-upload-files";
+import { usePersistedFiles } from "@/hooks/use-persisted-files";
 
 const DEFAULT_WEBHOOK = "http://localhost:5678/webhook/hypotheekakte";
 
@@ -88,9 +89,10 @@ interface GenerationResult {
 export function AkteGenerator() {
   const [mode, setMode] = useState<GenerationMode>("akte");
 
-  /** Alle PDF's van het dossier voor akte / akte+analyse (map-upload). */
-  const [akteDossierFiles, setAkteDossierFiles] = useState<File[]>([]);
-  const [analyseFiles, setAnalyseFiles] = useState<File[]>([]);
+  /** Alle PDF's van het dossier voor akte / akte+analyse (map-upload).
+   * Sessie-scoped bewaard, zodat een refresh de upload niet wist. */
+  const [akteDossierFiles, setAkteDossierFiles] = usePersistedFiles("akte");
+  const [analyseFiles, setAnalyseFiles] = usePersistedFiles("analyse");
   const [webhookUrl, setWebhookUrl] = useState(DEFAULT_WEBHOOK);
 
   const [isGenerating, setIsGenerating] = useState(false);

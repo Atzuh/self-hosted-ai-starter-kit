@@ -21,7 +21,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Stap 1 + 2: leest 'mode' uit het webhook-body en bouwt per binary-PDF\n// een Docling-item (base64). akte/beide: de HELE upload (alle PDF- en Word-bestanden) wordt verwerkt.\n// Classificatie: precies één primaire bank-passeeropdracht, één of meer kadaster-stukken,\n// overige bestanden = dossier (alleen mee naar juridische analyse, niet naar kadaster-extractie).\n//\n// Mode: 'akte' | 'beide' | 'analyse'\n\nconst webhookItem = $input.first();\nconst body = (webhookItem && webhookItem.json && webhookItem.json.body) || {};\nconst b = (webhookItem && webhookItem.binary) || {};\nconst keys = Object.keys(b);\n\nconst rawMode = String(body.mode || '').trim().toLowerCase();\n// Onbekende mode-waarden NIET silently normaliseren naar 'beide': dan zou\n// de Analyse Route fallback (P1.2) onbereikbaar blijven. Lege mode wordt\n// wel default 'beide' (back-compat voor clients die geen mode meesturen).\n// Mode Route ziet 'analyse' apart; alle andere (akte/beide/onbekend)\n// gaan via de bank+kadaster-classificatie hieronder.\nconst mode = rawMode || 'beide';\n\nif (keys.length === 0) {\n  throw new Error(\n    'Webhook ontving geen binary bestanden. Stuur PDF- of Word-bestanden (.docx) als multipart/form-data mee.'\n  );\n}\n\nfunction isConvertibleDoc(k) {\n  const fn = String(b[k]?.fileName || '').toLowerCase();\n  const mime = String(b[k]?.mimeType || '').toLowerCase();\n  if (fn.endsWith('.pdf') || mime.includes('pdf')) return true;\n  if (fn.endsWith('.docx')) return true;\n  if (mime.includes('wordprocessingml') || mime.includes('officedocument.wordprocessingml')) return true;\n  return false;\n}\n\nconst docKeys = keys.filter(isConvertibleDoc);\nif (docKeys.length === 0) {\n  throw new Error(\n    'Geen ondersteunde documenten (PDF of .docx) in de upload.'\n  );\n}\n\nasync function loadAsBase64(binaryKey) {\n  const buffer = await this.helpers.getBinaryDataBuffer(0, binaryKey);\n  return buffer.toString('base64');\n}\n\nconst base = {\n  receivedAt: new Date().toISOString(),\n  mode,\n};\n\nconst BANK_RX_LEGACY = /passeer|nti|rabobank|abnamro|abn[\\s_-]?amro|ing|obvion|munt|bank|stater/;\nconst KAD_RX_LEGACY = /eigendom|kadaster/;\n\nfunction bankScore(fname) {\n  const f = String(fname || '').toLowerCase();\n  if (\n    /passeerbevestig|passeergegevens|gelden\\s+notaris|conceptnota|factuur|\\bwwft\\b|bankpas|definitieve\\s+set|uitbetaling/i.test(f)\n  ) {\n    return -100;\n  }\n  let s = 0;\n  if (/passeeropdracht/i.test(f)) s += 200;\n  if (/notarisinstructie|voorlopige\\s+gegevens/i.test(f)) s += 180;\n  if (/rabobank|co[oö]peratieve\\s+rabo|abn|abnamro|\\bing\\b|obvion|regiobank|florius|aegon|asr/i.test(f)) s += 85;\n  if (/\\bnti\\b|nutsworth|stater/i.test(f)) s += 85;\n  if (/\\bpasseer\\b/i.test(f) && !/bevestig|melding|gegevens/i.test(f)) s += 35;\n  if (/voorlopig/i.test(f)) s -= 40;\n  return s;\n}\n\nfunction isKadasterName(fname) {\n  const f = String(fname || '').toLowerCase();\n  if (/passeeropdracht|notarisinstructie/i.test(f)) return false;\n  if (/passeerbevestig|\\bwwft\\b|\\bfactuur\\b|bankpas|uitbetaling|\\.eml|conceptnota|nota\\s+-/i.test(f)) {\n    return false;\n  }\n  return /kadastraal|hypothecair|eigendom|kadaster|objectlijst|rechthebbende|brondocument|uittreksel|kadastrale\\s+kaart|hypotheekakte|\\bkik\\b|\\bhyp\\d|onroerende\\s+zaken|perceel/i.test(f);\n}\n\nif (mode === 'analyse') {\n  const items = [];\n  for (const k of docKeys) {\n    const fname = String(b[k]?.fileName || '').toLowerCase();\n    let docType = 'overig';\n    if (bankScore(fname) >= 50) docType = 'bank';\n    else if (isKadasterName(fname) || KAD_RX_LEGACY.test(fname)) docType = 'kadaster';\n    const blob = await loadAsBase64.call(this, k);\n    items.push({\n      json: {\n        ...base,\n        docType,\n        filename: b[k]?.fileName || `${k}.pdf`,\n        base64_string: blob,\n      },\n    });\n  }\n  return items;\n}\n\nconst scored = docKeys.map((k) => {\n  const fname = String(b[k]?.fileName || k);\n  return { key: k, fname, score: bankScore(fname), kad: isKadasterName(fname) };\n});\n\nlet primary = null;\nlet best = -Infinity;\nfor (const row of scored) {\n  if (row.score > best) {\n    best = row.score;\n    primary = row;\n  }\n}\n\nconst EXPLICIT_BANK = new Set(['passeeropdracht', 'bank', 'file_bank', 'passeeropdracht_0']);\nfor (const row of scored) {\n  const lk = String(row.key || '').toLowerCase();\n  if (EXPLICIT_BANK.has(lk)) {\n    primary = row;\n    best = 9999;\n    break;\n  }\n}\n\nif (!primary || best < 30) {\n  const legacyBankKey = docKeys.find((k) =>\n    BANK_RX_LEGACY.test(String(b[k]?.fileName || '').toLowerCase())\n  );\n  if (legacyBankKey) {\n    primary = scored.find((s) => s.key === legacyBankKey) || {\n      key: legacyBankKey,\n      fname: String(b[legacyBankKey]?.fileName || ''),\n      score: 50,\n      kad: false,\n    };\n    best = primary.score;\n  }\n}\n\nif (!primary || best < 30) {\n  throw new Error(\n    `Geen bank-passeeropdracht herkend in de upload (${docKeys.length} bestand(en)). ` +\n      `Voeg de bank-passeeropdracht toe of gebruik een bestandsnaam met «passeeropdracht». ` +\n      `Files: ${scored.map((r) => r.fname).join(', ')}`\n  );\n}\n\nconst primaryKey = primary.key;\nconst kadasterKeys = [];\nfor (const row of scored) {\n  if (row.key === primaryKey) continue;\n  if (row.kad || KAD_RX_LEGACY.test(row.fname.toLowerCase())) {\n    kadasterKeys.push(row.key);\n  }\n}\n\nif (kadasterKeys.length === 0) {\n  const legacyKad = docKeys.find(\n    (k) => k !== primaryKey && KAD_RX_LEGACY.test(String(b[k]?.fileName || '').toLowerCase())\n  );\n  if (legacyKad) kadasterKeys.push(legacyKad);\n}\n\nif (kadasterKeys.length === 0) {\n  throw new Error(\n    `Geen kadastrale documenten herkend. Voeg minstens één stuk toe (kadastraal/hypothecair/uittreksel/objectlijst). ` +\n      `Files: ${scored.map((r) => r.fname).join(', ')}`\n  );\n}\n\nconst out = [];\nfor (const row of scored) {\n  const k = row.key;\n  const blob = await loadAsBase64.call(this, k);\n  const fname = b[k]?.fileName || `${k}.pdf`;\n  let docType;\n  if (k === primaryKey) docType = 'bank';\n  else if (kadasterKeys.includes(k)) docType = 'kadaster';\n  else docType = 'dossier';\n  out.push({\n    json: {\n      ...base,\n      docType,\n      filename: fname,\n      base64_string: blob,\n    },\n  });\n}\n\nreturn out;\n"
+        "jsCode": "// Stap 1 + 2: leest 'mode' uit het webhook-body en bouwt per binary-PDF\n// een Docling-item (base64). akte: de HELE upload (alle PDF- en Word-bestanden) wordt verwerkt.\n// Classificatie: precies één primaire bank-passeeropdracht, één of meer kadaster-stukken,\n// overige bestanden = dossier (alleen mee naar juridische analyse, niet naar kadaster-extractie).\n//\n// Mode: 'akte' | 'analyse'\n\nconst webhookItem = $input.first();\nconst body = (webhookItem && webhookItem.json && webhookItem.json.body) || {};\nconst b = (webhookItem && webhookItem.binary) || {};\nconst keys = Object.keys(b);\n\nconst rawMode = String(body.mode || '').trim().toLowerCase();\n// Nog maar twee modes: 'akte' en 'analyse' ('beide' is vervallen).\n// Lege mode wordt default 'akte' (back-compat voor clients die geen mode\n// meesturen). Mode Route ziet 'analyse' apart; alle andere (akte/onbekend)\n// gaan via de bank+kadaster-classificatie hieronder.\nconst mode = rawMode || 'akte';\n\nif (keys.length === 0) {\n  throw new Error(\n    'Webhook ontving geen binary bestanden. Stuur PDF- of Word-bestanden (.docx) als multipart/form-data mee.'\n  );\n}\n\nfunction isConvertibleDoc(k) {\n  const fn = String(b[k]?.fileName || '').toLowerCase();\n  const mime = String(b[k]?.mimeType || '').toLowerCase();\n  if (fn.endsWith('.pdf') || mime.includes('pdf')) return true;\n  if (fn.endsWith('.docx')) return true;\n  if (mime.includes('wordprocessingml') || mime.includes('officedocument.wordprocessingml')) return true;\n  return false;\n}\n\nconst docKeys = keys.filter(isConvertibleDoc);\nif (docKeys.length === 0) {\n  throw new Error(\n    'Geen ondersteunde documenten (PDF of .docx) in de upload.'\n  );\n}\n\nasync function loadAsBase64(binaryKey) {\n  const buffer = await this.helpers.getBinaryDataBuffer(0, binaryKey);\n  return buffer.toString('base64');\n}\n\nconst base = {\n  receivedAt: new Date().toISOString(),\n  mode,\n};\n\nconst BANK_RX_LEGACY = /passeer|nti|rabobank|abnamro|abn[\\s_-]?amro|ing|obvion|munt|bank|stater/;\nconst KAD_RX_LEGACY = /eigendom|kadaster/;\n\nfunction bankScore(fname) {\n  const f = String(fname || '').toLowerCase();\n  if (\n    /passeerbevestig|passeergegevens|gelden\\s+notaris|conceptnota|factuur|\\bwwft\\b|bankpas|definitieve\\s+set|uitbetaling/i.test(f)\n  ) {\n    return -100;\n  }\n  let s = 0;\n  if (/passeeropdracht/i.test(f)) s += 200;\n  if (/notarisinstructie|voorlopige\\s+gegevens/i.test(f)) s += 180;\n  if (/rabobank|co[oö]peratieve\\s+rabo|abn|abnamro|\\bing\\b|obvion|regiobank|florius|aegon|asr/i.test(f)) s += 85;\n  if (/\\bnti\\b|nutsworth|stater/i.test(f)) s += 85;\n  if (/\\bpasseer\\b/i.test(f) && !/bevestig|melding|gegevens/i.test(f)) s += 35;\n  if (/voorlopig/i.test(f)) s -= 40;\n  return s;\n}\n\nfunction isKadasterName(fname) {\n  const f = String(fname || '').toLowerCase();\n  if (/passeeropdracht|notarisinstructie/i.test(f)) return false;\n  if (/passeerbevestig|\\bwwft\\b|\\bfactuur\\b|bankpas|uitbetaling|\\.eml|conceptnota|nota\\s+-/i.test(f)) {\n    return false;\n  }\n  return /kadastraal|hypothecair|eigendom|kadaster|objectlijst|rechthebbende|brondocument|uittreksel|kadastrale\\s+kaart|hypotheekakte|\\bkik\\b|\\bhyp\\d|onroerende\\s+zaken|perceel/i.test(f);\n}\n\nif (mode === 'analyse') {\n  const items = [];\n  for (const k of docKeys) {\n    const fname = String(b[k]?.fileName || '').toLowerCase();\n    let docType = 'overig';\n    if (bankScore(fname) >= 50) docType = 'bank';\n    else if (isKadasterName(fname) || KAD_RX_LEGACY.test(fname)) docType = 'kadaster';\n    const blob = await loadAsBase64.call(this, k);\n    items.push({\n      json: {\n        ...base,\n        docType,\n        filename: b[k]?.fileName || `${k}.pdf`,\n        base64_string: blob,\n      },\n    });\n  }\n  return items;\n}\n\nconst scored = docKeys.map((k) => {\n  const fname = String(b[k]?.fileName || k);\n  return { key: k, fname, score: bankScore(fname), kad: isKadasterName(fname) };\n});\n\nlet primary = null;\nlet best = -Infinity;\nfor (const row of scored) {\n  if (row.score > best) {\n    best = row.score;\n    primary = row;\n  }\n}\n\nconst EXPLICIT_BANK = new Set(['passeeropdracht', 'bank', 'file_bank', 'passeeropdracht_0']);\nfor (const row of scored) {\n  const lk = String(row.key || '').toLowerCase();\n  if (EXPLICIT_BANK.has(lk)) {\n    primary = row;\n    best = 9999;\n    break;\n  }\n}\n\nif (!primary || best < 30) {\n  const legacyBankKey = docKeys.find((k) =>\n    BANK_RX_LEGACY.test(String(b[k]?.fileName || '').toLowerCase())\n  );\n  if (legacyBankKey) {\n    primary = scored.find((s) => s.key === legacyBankKey) || {\n      key: legacyBankKey,\n      fname: String(b[legacyBankKey]?.fileName || ''),\n      score: 50,\n      kad: false,\n    };\n    best = primary.score;\n  }\n}\n\nif (!primary || best < 30) {\n  throw new Error(\n    `Geen bank-passeeropdracht herkend in de upload (${docKeys.length} bestand(en)). ` +\n      `Voeg de bank-passeeropdracht toe of gebruik een bestandsnaam met «passeeropdracht». ` +\n      `Files: ${scored.map((r) => r.fname).join(', ')}`\n  );\n}\n\nconst primaryKey = primary.key;\nconst kadasterKeys = [];\nfor (const row of scored) {\n  if (row.key === primaryKey) continue;\n  if (row.kad || KAD_RX_LEGACY.test(row.fname.toLowerCase())) {\n    kadasterKeys.push(row.key);\n  }\n}\n\nif (kadasterKeys.length === 0) {\n  const legacyKad = docKeys.find(\n    (k) => k !== primaryKey && KAD_RX_LEGACY.test(String(b[k]?.fileName || '').toLowerCase())\n  );\n  if (legacyKad) kadasterKeys.push(legacyKad);\n}\n\nif (kadasterKeys.length === 0) {\n  throw new Error(\n    `Geen kadastrale documenten herkend. Voeg minstens één stuk toe (kadastraal/hypothecair/uittreksel/objectlijst). ` +\n      `Files: ${scored.map((r) => r.fname).join(', ')}`\n  );\n}\n\nconst out = [];\nfor (const row of scored) {\n  const k = row.key;\n  const blob = await loadAsBase64.call(this, k);\n  const fname = b[k]?.fileName || `${k}.pdf`;\n  let docType;\n  if (k === primaryKey) docType = 'bank';\n  else if (kadasterKeys.includes(k)) docType = 'kadaster';\n  else docType = 'dossier';\n  out.push({\n    json: {\n      ...base,\n      docType,\n      filename: fname,\n      base64_string: blob,\n    },\n  });\n}\n\nreturn out;\n"
       },
       "id": "f31efc5e-73a8-4d89-b436-a663f6aa0010",
       "name": "Split Input Files",
@@ -65,7 +65,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Per Docling-response: pak de markdown en bewaar docType + mode + bestandsnaam.\nconst sourceItem = $('Split Input Files').itemMatching($itemIndex);\nconst docType = sourceItem?.json?.docType || $json.docType || 'overig';\nconst mode = sourceItem?.json?.mode || 'beide';\nconst filename = sourceItem?.json?.filename || '';\n\nconst payload = $json;\nlet md = '';\nif (payload?.document?.md_content) md = payload.document.md_content;\nelse if (payload?.md_content) md = payload.md_content;\nelse if (payload?.result?.document?.md_content) md = payload.result.document.md_content;\nelse if (Array.isArray(payload?.documents) && payload.documents[0]?.md_content) md = payload.documents[0].md_content;\n\nif (!md) {\n  throw new Error(`Docling gaf geen md_content terug voor ${filename || docType}. Top-level keys: ${Object.keys(payload || {}).join(', ')}`);\n}\n\n// Strip ingesloten afbeeldingen. Docling sluit soms volledige bitmaps als\n// base64 data-URI in de markdown in (bv. een BRP-uitdraai met logo/foto).\n// Die ruis vult de LLM-context (gemeten tot 70%+ van de prompt) en doet het\n// model onzin/gibberish produceren. We verwijderen de beelddata; de\n// leesbare tekst blijft volledig intact.\nfunction stripEmbeddedImages(text) {\n  let t = String(text || '');\n  // Markdown-afbeelding met data-URI: ![alt](data:image/png;base64,....)\n  t = t.replace(/!\\[[^\\]]*\\]\\(\\s*data:[^)]*\\)/gi, '');\n  // HTML <img src=\"data:...\">\n  t = t.replace(/<img[^>]*src=[\"']?data:[^>]*>/gi, '');\n  // Vangnet: overgebleven kale data-URI's (contigue base64-reeks).\n  t = t.replace(/data:image\\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '');\n  // Opruimen: 3+ opeenvolgende lege regels terugbrengen naar 1 lege regel.\n  t = t.replace(/\\n{3,}/g, '\\n\\n');\n  return t.trim();\n}\n\nmd = stripEmbeddedImages(md);\n\nreturn { json: { docType, mode, filename, markdown: md } };"
+        "jsCode": "// Per Docling-response: pak de markdown en bewaar docType + mode + bestandsnaam.\nconst sourceItem = $('Split Input Files').itemMatching($itemIndex);\nconst docType = sourceItem?.json?.docType || $json.docType || 'overig';\nconst mode = sourceItem?.json?.mode || 'akte';\nconst filename = sourceItem?.json?.filename || '';\n\nconst payload = $json;\nlet md = '';\nif (payload?.document?.md_content) md = payload.document.md_content;\nelse if (payload?.md_content) md = payload.md_content;\nelse if (payload?.result?.document?.md_content) md = payload.result.document.md_content;\nelse if (Array.isArray(payload?.documents) && payload.documents[0]?.md_content) md = payload.documents[0].md_content;\n\nif (!md) {\n  throw new Error(`Docling gaf geen md_content terug voor ${filename || docType}. Top-level keys: ${Object.keys(payload || {}).join(', ')}`);\n}\n\n// Strip ingesloten afbeeldingen. Docling sluit soms volledige bitmaps als\n// base64 data-URI in de markdown in (bv. een BRP-uitdraai met logo/foto).\n// Die ruis vult de LLM-context (gemeten tot 70%+ van de prompt) en doet het\n// model onzin/gibberish produceren. We verwijderen de beelddata; de\n// leesbare tekst blijft volledig intact.\nfunction stripEmbeddedImages(text) {\n  let t = String(text || '');\n  // Markdown-afbeelding met data-URI: ![alt](data:image/png;base64,....)\n  t = t.replace(/!\\[[^\\]]*\\]\\(\\s*data:[^)]*\\)/gi, '');\n  // HTML <img src=\"data:...\">\n  t = t.replace(/<img[^>]*src=[\"']?data:[^>]*>/gi, '');\n  // Vangnet: overgebleven kale data-URI's (contigue base64-reeks).\n  t = t.replace(/data:image\\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '');\n  // Opruimen: 3+ opeenvolgende lege regels terugbrengen naar 1 lege regel.\n  t = t.replace(/\\n{3,}/g, '\\n\\n');\n  return t.trim();\n}\n\nmd = stripEmbeddedImages(md);\n\nreturn { json: { docType, mode, filename, markdown: md } };"
       },
       "id": "f54dcbcb-5f7a-447d-8fd6-a663f6aa0012",
       "name": "Extract Markdown",
@@ -122,7 +122,7 @@
                 "combinator": "and"
               },
               "renameOutput": true,
-              "outputKey": "akte_of_beide"
+              "outputKey": "akte"
             }
           ]
         },
@@ -179,7 +179,8 @@
         "model": "qwen2.5:7b",
         "options": {
           "temperature": 0.1,
-          "format": "json"
+          "format": "json",
+          "numCtx": 8192
         }
       },
       "id": "c0a1b2c3-0005-4f00-aaaa-a663f6aa0024",
@@ -199,7 +200,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parseert de juridische analyse JSON die de LLM teruggeeft (analyse-only-flow).\n// Identieke logica als de 'beide'-flow Parse Analysis JSON: mega-prompt output\n// wordt gecombineerd met specialist-bevindingen (Vererving, Lasten,\n// Burgerlijke). Specialist-bevindingen krijgen voorrang in hun eigen\n// categorie; mega-prompt mag alleen in een specialist-categorie blijven als\n// die specialist niets gevonden heeft.\nfunction extractText(j) {\n  if (!j || typeof j !== 'object') return '';\n  if (typeof j.text === 'string' && j.text) return j.text;\n  if (typeof j.output === 'string' && j.output) return j.output;\n  if (typeof j.answer === 'string' && j.answer) return j.answer;\n  if (typeof j.response === 'string' && j.response) return j.response;\n  if (typeof j?.message?.content === 'string' && j.message.content) return j.message.content;\n  return '';\n}\nfunction unwrapJsonLike(s) {\n  let t = String(s || '').trim();\n  const fence = /^```(?:json)?\\s*\\r?\\n?([\\s\\S]*?)\\r?\\n?```$/im;\n  const m = t.match(fence);\n  if (m) return m[1].trim();\n  if (t.startsWith('```')) {\n    t = t.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/i, '');\n  }\n  return t.trim();\n}\nfunction parseAnalysis(jsonNode) {\n  const raw = extractText(jsonNode).trim();\n  if (raw) {\n    try { const _p = JSON.parse(unwrapJsonLike(raw)); if (!Array.isArray(_p)) return _p; } catch {}\n    const m = raw.match(/\\{[\\s\\S]*\\}/);\n    if (m) {\n      try { return JSON.parse(m[0]); } catch {}\n    }\n  }\n  const META = new Set(['pairedItem', 'sourceData', '$node']);\n  const obj = {};\n  for (const k of Object.keys(jsonNode || {})) {\n    if (!META.has(k) && !k.startsWith('_')) obj[k] = jsonNode[k];\n  }\n  if ('aandachtspunten' in obj || 'samenvatting' in obj) return obj;\n  return null;\n}\n\nconst all = $input.all();\nconst node = all[0]?.json || {};\nlet parsed = parseAnalysis(node);\n\nif (!parsed || typeof parsed !== 'object') {\n  parsed = { samenvatting: '', aandachtspunten: [] };\n}\n\nconst WRAPPER_KEYS = new Set(['analyse', 'analysis', 'data', 'response', 'result', 'output']);\nlet depth = 0;\nwhile (\n  parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&\n  Object.keys(parsed).length === 1 &&\n  WRAPPER_KEYS.has(Object.keys(parsed)[0]) && depth < 3\n) {\n  parsed = parsed[Object.keys(parsed)[0]];\n  depth++;\n}\n\nconst aandacht = Array.isArray(parsed.aandachtspunten) ? parsed.aandachtspunten : [];\nconst ALLOWED = new Set(['kritiek', 'aandacht', 'info']);\nconst ALIASES = { critical: 'kritiek', blokkerend: 'kritiek', warning: 'aandacht', warn: 'aandacht', notice: 'info', informatief: 'info' };\nconst normalised = aandacht.map((ap, i) => {\n  const e = String(ap?.ernst || '').trim().toLowerCase();\n  const ernst = ALLOWED.has(e) ? e : (ALIASES[e] || 'info');\n  return {\n    id: String(ap?.id || `punt-${i + 1}`),\n    ernst,\n    categorie: String(ap?.categorie || 'Overig'),\n    titel: String(ap?.titel || '').slice(0, 160),\n    constatering: String(ap?.constatering || ''),\n    juridisch_kader: String(ap?.juridisch_kader || ''),\n    actie: String(ap?.actie || ''),\n    bronnen: Array.isArray(ap?.bronnen) ? ap.bronnen.map(String) : []\n  };\n});\n\nconst samenvatting = String(parsed.samenvatting || '').trim();\n\n// Haal de drie specialist-bevindingen op (Parse * Analyse JSON zit elk in\n// de directe voorouder-chain, dus $() is hier betrouwbaar).\nlet verervingItems = [];\nlet lastenItems = [];\nlet burgerlijkeItems = [];\ntry {\n  const v = $('Parse Vererving JSON').first()?.json;\n  if (Array.isArray(v?.vererving_aandachtspunten)) verervingItems = v.vererving_aandachtspunten;\n} catch (e) { console.error('[Parse Flex Analysis JSON] vererving merge:', e?.message); }\ntry {\n  const l = $('Parse Lasten JSON').first()?.json;\n  if (Array.isArray(l?.lasten_aandachtspunten)) lastenItems = l.lasten_aandachtspunten;\n} catch (e) { console.error('[Parse Flex Analysis JSON] lasten merge:', e?.message); }\ntry {\n  const b = $('Parse Burgerlijke JSON').first()?.json;\n  if (Array.isArray(b?.burgerlijke_aandachtspunten)) burgerlijkeItems = b.burgerlijke_aandachtspunten;\n} catch (e) { console.error('[Parse Flex Analysis JSON] burgerlijke merge:', e?.message); }\n\n// Filter mega-prompt items in de drie specialist-categorieën. Specialist\n// heeft voorrang; alleen als de specialist 0 items teruggaf mag mega-prompt\n// die categorie nog vullen.\nconst RESERVED = {\n  'vererving': verervingItems,\n  'lasten en beperkingen': lastenItems,\n  'burgerlijke staat': burgerlijkeItems,\n};\nconst filteredNorm = normalised.filter((ap) => {\n  const cat = String(ap?.categorie || '').toLowerCase();\n  const owner = RESERVED[cat];\n  if (!owner) return true;\n  return owner.length === 0;\n});\n\nconst seenM = new Set();\nconst merged = [];\nfor (const ap of [...verervingItems, ...lastenItems, ...burgerlijkeItems, ...filteredNorm]) {\n  const id = String(ap?.id || '').trim();\n  if (id && seenM.has(id)) continue;\n  if (id) seenM.add(id);\n  merged.push(ap);\n}\nconst ORDER_M = { kritiek: 0, aandacht: 1, info: 2 };\nmerged.sort((a, b) => (ORDER_M[a.ernst] ?? 9) - (ORDER_M[b.ernst] ?? 9));\n\nreturn [{\n  json: {\n    analysis: {\n      samenvatting,\n      aandachtspunten: merged\n    },\n    counts: {\n      kritiek: merged.filter((x) => x.ernst === 'kritiek').length,\n      aandacht: merged.filter((x) => x.ernst === 'aandacht').length,\n      info: merged.filter((x) => x.ernst === 'info').length,\n      totaal: merged.length,\n      specialisten: {\n        vererving: verervingItems.length,\n        lasten: lastenItems.length,\n        burgerlijke: burgerlijkeItems.length\n      }\n    }\n  }\n}];\n"
+        "jsCode": "// Parseert de juridische analyse JSON die de LLM teruggeeft (mode=analyse).\n// Mega-prompt output wordt gecombineerd met de vier specialist-bevindingen\n// (Vererving, Lasten, Burgerlijke, Object&partijen). Specialist-bevindingen krijgen voorrang in hun eigen\n// categorie; mega-prompt mag alleen in een specialist-categorie blijven als\n// die specialist niets gevonden heeft.\nfunction extractText(j) {\n  if (!j || typeof j !== 'object') return '';\n  if (typeof j.text === 'string' && j.text) return j.text;\n  if (typeof j.output === 'string' && j.output) return j.output;\n  if (typeof j.answer === 'string' && j.answer) return j.answer;\n  if (typeof j.response === 'string' && j.response) return j.response;\n  if (typeof j?.message?.content === 'string' && j.message.content) return j.message.content;\n  return '';\n}\nfunction unwrapJsonLike(s) {\n  let t = String(s || '').trim();\n  const fence = /^```(?:json)?\\s*\\r?\\n?([\\s\\S]*?)\\r?\\n?```$/im;\n  const m = t.match(fence);\n  if (m) return m[1].trim();\n  if (t.startsWith('```')) {\n    t = t.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/i, '');\n  }\n  return t.trim();\n}\nfunction parseAnalysis(jsonNode) {\n  const raw = extractText(jsonNode).trim();\n  if (raw) {\n    try { const _p = JSON.parse(unwrapJsonLike(raw)); if (!Array.isArray(_p)) return _p; } catch {}\n    const m = raw.match(/\\{[\\s\\S]*\\}/);\n    if (m) {\n      try { return JSON.parse(m[0]); } catch {}\n    }\n  }\n  const META = new Set(['pairedItem', 'sourceData', '$node']);\n  const obj = {};\n  for (const k of Object.keys(jsonNode || {})) {\n    if (!META.has(k) && !k.startsWith('_')) obj[k] = jsonNode[k];\n  }\n  if ('aandachtspunten' in obj || 'samenvatting' in obj) return obj;\n  return null;\n}\n\nconst all = $input.all();\nconst node = all[0]?.json || {};\nlet parsed = parseAnalysis(node);\n\nif (!parsed || typeof parsed !== 'object') {\n  parsed = { samenvatting: '', aandachtspunten: [] };\n}\n\nconst WRAPPER_KEYS = new Set(['analyse', 'analysis', 'data', 'response', 'result', 'output']);\nlet depth = 0;\nwhile (\n  parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&\n  Object.keys(parsed).length === 1 &&\n  WRAPPER_KEYS.has(Object.keys(parsed)[0]) && depth < 3\n) {\n  parsed = parsed[Object.keys(parsed)[0]];\n  depth++;\n}\n\nconst aandacht = Array.isArray(parsed.aandachtspunten) ? parsed.aandachtspunten : [];\nconst ALLOWED = new Set(['kritiek', 'aandacht', 'info']);\nconst ALIASES = { critical: 'kritiek', blokkerend: 'kritiek', warning: 'aandacht', warn: 'aandacht', notice: 'info', informatief: 'info' };\nconst normalised = aandacht.map((ap, i) => {\n  const e = String(ap?.ernst || '').trim().toLowerCase();\n  const ernst = ALLOWED.has(e) ? e : (ALIASES[e] || 'info');\n  return {\n    id: String(ap?.id || `punt-${i + 1}`),\n    ernst,\n    categorie: String(ap?.categorie || 'Overig'),\n    titel: String(ap?.titel || '').slice(0, 160),\n    constatering: String(ap?.constatering || ''),\n    juridisch_kader: String(ap?.juridisch_kader || ''),\n    actie: String(ap?.actie || ''),\n    bronnen: Array.isArray(ap?.bronnen) ? ap.bronnen.map(String) : []\n  };\n});\n\nconst samenvatting = String(parsed.samenvatting || '').trim();\n\n// Haal de drie specialist-bevindingen op (Parse * Analyse JSON zit elk in\n// de directe voorouder-chain, dus $() is hier betrouwbaar).\nlet verervingItems = [];\nlet lastenItems = [];\nlet burgerlijkeItems = [];\nlet partijenItems = [];\ntry {\n  const v = $('Parse Vererving JSON').first()?.json;\n  if (Array.isArray(v?.vererving_aandachtspunten)) verervingItems = v.vererving_aandachtspunten;\n} catch (e) { console.error('[Parse Flex Analysis JSON] vererving merge:', e?.message); }\ntry {\n  const l = $('Parse Lasten JSON').first()?.json;\n  if (Array.isArray(l?.lasten_aandachtspunten)) lastenItems = l.lasten_aandachtspunten;\n} catch (e) { console.error('[Parse Flex Analysis JSON] lasten merge:', e?.message); }\ntry {\n  const b = $('Parse Burgerlijke JSON').first()?.json;\n  if (Array.isArray(b?.burgerlijke_aandachtspunten)) burgerlijkeItems = b.burgerlijke_aandachtspunten;\n} catch (e) { console.error('[Parse Flex Analysis JSON] burgerlijke merge:', e?.message); }\ntry {\n  const p = $('Parse Partijen JSON').first()?.json;\n  if (Array.isArray(p?.partijen_aandachtspunten)) partijenItems = p.partijen_aandachtspunten;\n} catch (e) { console.error('[Parse Flex Analysis JSON] partijen merge:', e?.message); }\n\n// Filter mega-prompt items in de vier specialist-categorieën. Specialist\n// heeft voorrang; alleen als de specialist 0 items teruggaf mag mega-prompt\n// die categorie nog vullen.\nconst RESERVED = {\n  'vererving': verervingItems,\n  'lasten en beperkingen': lastenItems,\n  'burgerlijke staat': burgerlijkeItems,\n  'object en partijen': partijenItems,\n};\nconst filteredNorm = normalised.filter((ap) => {\n  const cat = String(ap?.categorie || '').toLowerCase();\n  const owner = RESERVED[cat];\n  if (!owner) return true;\n  return owner.length === 0;\n});\n\nconst seenM = new Set();\nconst merged = [];\nfor (const ap of [...verervingItems, ...lastenItems, ...burgerlijkeItems, ...partijenItems, ...filteredNorm]) {\n  const id = String(ap?.id || '').trim();\n  if (id && seenM.has(id)) continue;\n  if (id) seenM.add(id);\n  merged.push(ap);\n}\nconst ORDER_M = { kritiek: 0, aandacht: 1, info: 2 };\nmerged.sort((a, b) => (ORDER_M[a.ernst] ?? 9) - (ORDER_M[b.ernst] ?? 9));\n\n// Deterministische, gegarandeerd consistente samenvatting-aanvulling. De LLM\n// beschrijft het dossier feitelijk (zonder oordeel over aandachtspunten); de\n// telling hieronder komt uit de daadwerkelijk samengevoegde bevindingen, zodat\n// de samenvatting die nooit meer tegenspreekt (fix observatie 2).\nconst kritiekCount = merged.filter((x) => x.ernst === 'kritiek').length;\nconst aandachtCount = merged.filter((x) => x.ernst === 'aandacht').length;\nconst infoCount = merged.filter((x) => x.ernst === 'info').length;\n\nconst delen = [];\nif (kritiekCount) delen.push(`${kritiekCount}\\u00d7 kritiek`);\nif (aandachtCount) delen.push(`${aandachtCount}\\u00d7 aandacht`);\nif (infoCount) delen.push(`${infoCount}\\u00d7 info`);\n\nlet bevindingenZin;\nif (delen.length === 0) {\n  bevindingenZin = 'De analyse signaleert geen bijzondere juridische aandachtspunten.';\n} else {\n  bevindingenZin = `De analyse signaleert ${merged.length} aandachtspunt${merged.length === 1 ? '' : 'en'} (${delen.join(', ')}).`;\n  const kritiekTitels = merged.filter((x) => x.ernst === 'kritiek').map((x) => x.titel).filter(Boolean);\n  if (kritiekTitels.length) bevindingenZin += ` Kritiek: ${kritiekTitels.join('; ')}.`;\n}\n\nconst finalSamenvatting = [samenvatting, bevindingenZin].filter(Boolean).join(' ').trim();\n\nreturn [{\n  json: {\n    analysis: {\n      samenvatting: finalSamenvatting,\n      aandachtspunten: merged\n    },\n    counts: {\n      kritiek: kritiekCount,\n      aandacht: aandachtCount,\n      info: infoCount,\n      totaal: merged.length,\n      specialisten: {\n        vererving: verervingItems.length,\n        lasten: lastenItems.length,\n        burgerlijke: burgerlijkeItems.length,\n        partijen: partijenItems.length\n      }\n    }\n  }\n}];\n"
       },
       "id": "c0a1b2c3-0006-4f00-aaaa-a663f6aa0025",
       "name": "Parse Flex Analysis JSON",
@@ -279,7 +280,8 @@
         "model": "qwen2.5:7b",
         "options": {
           "temperature": 0,
-          "format": "json"
+          "format": "json",
+          "numCtx": 8192
         }
       },
       "id": "32e8fda0-9201-4b40-9f9f-a663f6aa0017",
@@ -382,70 +384,7 @@
     },
     {
       "parameters": {
-        "rules": {
-          "values": [
-            {
-              "conditions": {
-                "options": {
-                  "caseSensitive": true,
-                  "leftValue": "",
-                  "typeValidation": "loose"
-                },
-                "conditions": [
-                  {
-                    "leftValue": "={{ $('Split Input Files').first().json.mode }}",
-                    "rightValue": "beide",
-                    "operator": {
-                      "type": "string",
-                      "operation": "equals"
-                    }
-                  }
-                ],
-                "combinator": "and"
-              },
-              "renameOutput": true,
-              "outputKey": "beide"
-            },
-            {
-              "conditions": {
-                "options": {
-                  "caseSensitive": true,
-                  "leftValue": "",
-                  "typeValidation": "loose"
-                },
-                "conditions": [
-                  {
-                    "leftValue": "={{ $('Split Input Files').first().json.mode }}",
-                    "rightValue": "akte",
-                    "operator": {
-                      "type": "string",
-                      "operation": "equals"
-                    }
-                  }
-                ],
-                "combinator": "and"
-              },
-              "renameOutput": true,
-              "outputKey": "akte"
-            }
-          ]
-        },
-        "options": {
-          "fallbackOutput": 1
-        }
-      },
-      "id": "c0a1b2c3-0009-4f00-aaaa-a663f6aa0028",
-      "name": "Analyse Route",
-      "type": "n8n-nodes-base.switch",
-      "typeVersion": 3.2,
-      "position": [
-        2320,
-        200
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Vererving-specialist (unified). Werkt voor beide modes:\n//   mode='beide'   -> input via $('Build Placeholders').analysisInput.kadaster_markdown\n//   mode='analyse' -> input via $('Aggregate Markdowns').docs[] (combined)\nconst fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\n\nconst mode = String($('Split Input Files').first()?.json?.mode || '').trim().toLowerCase();\nconst isAnalyseMode = mode === 'analyse';\n\nlet registry;\ntry {\n  registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));\n} catch (err) {\n  throw new Error(`Kon templates-registry niet lezen (${REGISTRY_PATH}): ${err.message}`);\n}\n\nconst tmpl = String(registry.legal_specialist_prompts?.vererving || '');\nif (!tmpl) {\n  throw new Error('registry.json mist legal_specialist_prompts.vererving.');\n}\n\nfunction clamp(s, max) {\n  const txt = String(s || '');\n  if (txt.length <= max) return txt;\n  return txt.slice(0, max) + '\\n…[afgekapt voor vererving-prompt]';\n}\n\nconst limits = (registry.context_limits || {});\nconst MAX_MD = Number(limits.specialist_vererving) || 14000;\n\nlet kadMdFull = '';\nlet metaForward = {};\nif (isAnalyseMode) {\n  const aggItem = $('Aggregate Markdowns').first()?.json || {};\n  const docs = Array.isArray(aggItem.docs) ? aggItem.docs : [];\n  kadMdFull = docs.map((d, i) => {\n    const label = d.docType === 'bank' ? 'Bank-passeeropdracht'\n      : d.docType === 'kadaster' ? 'Kadaster eigendomsinformatie'\n      : 'Overig dossier-stuk';\n    return `=== DOCUMENT ${i + 1} — ${label} — ${d.filename || `document_${i + 1}`} ===\\n${d.markdown || ''}`;\n  }).join('\\n\\n');\n  metaForward = {\n    bankDisplayName: aggItem.bankDisplayName || '',\n    zaaknummer: aggItem.zaaknummer || '',\n  };\n} else {\n  const placeholdersItem = $('Build Placeholders').first();\n  const meta = placeholdersItem?.json || {};\n  const input = meta.analysisInput || {};\n  kadMdFull = String(input.kadaster_markdown || '');\n  metaForward = {\n    bankId: meta.bankId,\n    bankDisplayName: meta.bankDisplayName,\n    zaaknummer: meta.zaaknummer,\n  };\n}\n\nconst kadMd = clamp(kadMdFull, MAX_MD);\n\nconst PATTERNS = [\n  /(?:^|\\b)overled(?:en|\\.)/i,\n  // BRP gebruikt het zelfstandig naamwoord \"Overlijden\" (bv. \"Reden\n  // ontbinding: Overlijden echtgenoot/geregistreerd partner\") — dat moet\n  // óók de erfrecht-specialist triggeren, niet alleen de werkwoordsvorm.\n  /overlijden/i,\n  /reden\\s+ontbinding[^\\n]*overl(?:ijden|eden)/i,\n  /†/,\n  /verklaring\\s+van\\s+erfrecht/i,\n  /akte\\s+van\\s+verdeling/i,\n  /\\b(?:weduwe|weduwnaar)\\b/i,\n  /onverdeelde\\s+nalatenschap/i,\n  /(?:sterfdatum|datum\\s+van\\s+overlijden)/i,\n  /wettelijke\\s+verdeling/i,\n  /(?:saisine|art\\.?\\s*4:182)/i,\n];\n\nconst hits = [];\nfor (const re of PATTERNS) {\n  const m = kadMdFull.match(re);\n  if (m) hits.push(m[0]);\n}\nconst signalCount = hits.length;\n\nlet chatInput;\nif (signalCount > 0) {\n  chatInput = tmpl.split('{{kadaster_markdown}}').join(kadMd);\n} else {\n  chatInput = 'Het bijgevoegde kadasterfragment bevat geen indicaties van vererving, overlijden, verklaring van erfrecht of een onverdeelde nalatenschap. Geef ALLEEN deze JSON terug, niets anders:\\n{\"aandachtspunten\": []}';\n}\n\nreturn {\n  json: {\n    chatInput,\n    signal_count: signalCount,\n    signal_hits: hits.slice(0, 5),\n    mode,\n    ...metaForward,\n  }\n};\n"
+        "jsCode": "// Vererving-specialist. Draait in mode='analyse'; input via $('Aggregate Markdowns').docs[].\nconst fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\n\nconst mode = String($('Split Input Files').first()?.json?.mode || '').trim().toLowerCase();\n\nlet registry;\ntry {\n  registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));\n} catch (err) {\n  throw new Error(`Kon templates-registry niet lezen (${REGISTRY_PATH}): ${err.message}`);\n}\n\nconst tmpl = String(registry.legal_specialist_prompts?.vererving || '');\nif (!tmpl) {\n  throw new Error('registry.json mist legal_specialist_prompts.vererving.');\n}\n\nfunction clamp(s, max) {\n  const txt = String(s || '');\n  if (txt.length <= max) return txt;\n  return txt.slice(0, max) + '\\n…[afgekapt voor vererving-prompt]';\n}\n\nconst limits = (registry.context_limits || {});\nconst MAX_MD = Number(limits.specialist_vererving) || 14000;\n\nlet kadMdFull = '';\nlet metaForward = {};\nconst aggItem = $('Aggregate Markdowns').first()?.json || {};\nconst docs = Array.isArray(aggItem.docs) ? aggItem.docs : [];\nkadMdFull = docs.map((d, i) => {\n  const label = d.docType === 'bank' ? 'Bank-passeeropdracht'\n    : d.docType === 'kadaster' ? 'Kadaster eigendomsinformatie'\n    : 'Overig dossier-stuk';\n  return `=== DOCUMENT ${i + 1} — ${label} — ${d.filename || `document_${i + 1}`} ===\\n${d.markdown || ''}`;\n}).join('\\n\\n');\nmetaForward = {\n  bankDisplayName: aggItem.bankDisplayName || '',\n  zaaknummer: aggItem.zaaknummer || '',\n};\n\nconst kadMd = clamp(kadMdFull, MAX_MD);\n\nconst PATTERNS = [\n  /(?:^|\\b)overled(?:en|\\.)/i,\n  // BRP gebruikt het zelfstandig naamwoord \"Overlijden\" (bv. \"Reden\n  // ontbinding: Overlijden echtgenoot/geregistreerd partner\") — dat moet\n  // óók de erfrecht-specialist triggeren, niet alleen de werkwoordsvorm.\n  /overlijden/i,\n  /reden\\s+ontbinding[^\\n]*overl(?:ijden|eden)/i,\n  /†/,\n  /verklaring\\s+van\\s+erfrecht/i,\n  /akte\\s+van\\s+verdeling/i,\n  /\\b(?:weduwe|weduwnaar)\\b/i,\n  /onverdeelde\\s+nalatenschap/i,\n  /(?:sterfdatum|datum\\s+van\\s+overlijden)/i,\n  /wettelijke\\s+verdeling/i,\n  /(?:saisine|art\\.?\\s*4:182)/i,\n];\n\nconst hits = [];\nfor (const re of PATTERNS) {\n  const m = kadMdFull.match(re);\n  if (m) hits.push(m[0]);\n}\nconst signalCount = hits.length;\n\nlet chatInput;\nif (signalCount > 0) {\n  chatInput = tmpl.split('{{kadaster_markdown}}').join(kadMd);\n} else {\n  chatInput = 'Het bijgevoegde kadasterfragment bevat geen indicaties van vererving, overlijden, verklaring van erfrecht of een onverdeelde nalatenschap. Geef ALLEEN deze JSON terug, niets anders:\\n{\"aandachtspunten\": []}';\n}\n\nreturn {\n  json: {\n    chatInput,\n    signal_count: signalCount,\n    signal_hits: hits.slice(0, 5),\n    mode,\n    ...metaForward,\n  }\n};\n"
       },
       "id": "e2f3a4b5-0001-4f00-aaaa-a663f6aa0050",
       "name": "Build Vererving Prompt",
@@ -506,7 +445,8 @@
         "options": {
           "temperature": 0,
           "format": "json",
-          "keep_alive": "30m"
+          "keepAlive": "30m",
+          "numCtx": 8192
         }
       },
       "id": "e2f3a4b5-0003-4f00-aaaa-a663f6aa0052",
@@ -539,7 +479,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Lasten-specialist (unified). Werkt voor beide modes:\n//   mode='beide'   -> input via $('Build Placeholders').analysisInput.kadaster_markdown\n//   mode='analyse' -> input via $('Aggregate Markdowns').docs[] (combined)\nconst fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\n\nconst mode = String($('Split Input Files').first()?.json?.mode || '').trim().toLowerCase();\nconst isAnalyseMode = mode === 'analyse';\n\nlet registry;\ntry {\n  registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));\n} catch (err) {\n  throw new Error(`Kon templates-registry niet lezen (${REGISTRY_PATH}): ${err.message}`);\n}\n\nconst tmpl = String(registry.legal_specialist_prompts?.lasten || '');\nif (!tmpl) {\n  throw new Error('registry.json mist legal_specialist_prompts.lasten.');\n}\n\nfunction clamp(s, max) {\n  const txt = String(s || '');\n  if (txt.length <= max) return txt;\n  return txt.slice(0, max) + '\\n…[afgekapt voor lasten-prompt]';\n}\n\nconst limits = (registry.context_limits || {});\nconst MAX_MD = Number(limits.specialist_lasten) || 14000;\n\nlet kadMdFull = '';\nlet metaForward = {};\nif (isAnalyseMode) {\n  const aggItem = $('Aggregate Markdowns').first()?.json || {};\n  const docs = Array.isArray(aggItem.docs) ? aggItem.docs : [];\n  kadMdFull = docs.map((d, i) => {\n    const label = d.docType === 'bank' ? 'Bank-passeeropdracht'\n      : d.docType === 'kadaster' ? 'Kadaster eigendomsinformatie'\n      : 'Overig dossier-stuk';\n    return `=== DOCUMENT ${i + 1} — ${label} — ${d.filename || `document_${i + 1}`} ===\\n${d.markdown || ''}`;\n  }).join('\\n\\n');\n  metaForward = {\n    bankDisplayName: aggItem.bankDisplayName || '',\n    zaaknummer: aggItem.zaaknummer || '',\n  };\n} else {\n  const placeholdersItem = $('Build Placeholders').first();\n  const meta = placeholdersItem?.json || {};\n  const input = meta.analysisInput || {};\n  kadMdFull = String(input.kadaster_markdown || '');\n  metaForward = {\n    bankId: meta.bankId,\n    bankDisplayName: meta.bankDisplayName,\n    zaaknummer: meta.zaaknummer,\n  };\n}\n\nconst kadMd = clamp(kadMdFull, MAX_MD);\n\nconst PATTERNS = [\n  /\\bbeslag(?:legger|gen|en)?\\b/i,\n  /(?:executoriaal|conservatoir)\\s+beslag/i,\n  /\\berfpacht/i,\n  /\\bopstalrecht\\b/i,\n  /recht\\s+van\\s+opstal/i,\n  /\\bvruchtgebruik/i,\n  /\\bhuurbeding\\b/i,\n  /\\bkettingbeding\\b/i,\n  /kwalitatieve\\s+verplichting/i,\n  /wet\\s+voorkeursrecht/i,\n  /\\bWvg\\b/,\n  /\\bvoorkeursrecht\\b/i,\n  /\\bexploitatiebijdrage\\b/i,\n  /\\bbaatbelasting\\b/i,\n  /\\bwegenfonds\\b/i,\n];\n\nconst hits = [];\nfor (const re of PATTERNS) {\n  const m = kadMdFull.match(re);\n  if (m) hits.push(m[0]);\n}\nconst signalCount = hits.length;\n\nlet chatInput;\nif (signalCount > 0) {\n  chatInput = tmpl.split('{{kadaster_markdown}}').join(kadMd);\n} else {\n  chatInput = 'Het bijgevoegde kadasterfragment bevat geen indicaties van beslagen, erfpacht, opstal, vruchtgebruik, huurbeding, kettingbeding, kwalitatieve verplichtingen of voorkeursrechten. Geef ALLEEN deze JSON terug, niets anders:\\n{\"aandachtspunten\": []}';\n}\n\nreturn {\n  json: {\n    chatInput,\n    signal_count: signalCount,\n    signal_hits: hits.slice(0, 5),\n    mode,\n    ...metaForward,\n  }\n};\n"
+        "jsCode": "// Lasten-specialist. Draait in mode='analyse'; input via $('Aggregate Markdowns').docs[].\nconst fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\n\nconst mode = String($('Split Input Files').first()?.json?.mode || '').trim().toLowerCase();\n\nlet registry;\ntry {\n  registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));\n} catch (err) {\n  throw new Error(`Kon templates-registry niet lezen (${REGISTRY_PATH}): ${err.message}`);\n}\n\nconst tmpl = String(registry.legal_specialist_prompts?.lasten || '');\nif (!tmpl) {\n  throw new Error('registry.json mist legal_specialist_prompts.lasten.');\n}\n\nfunction clamp(s, max) {\n  const txt = String(s || '');\n  if (txt.length <= max) return txt;\n  return txt.slice(0, max) + '\\n…[afgekapt voor lasten-prompt]';\n}\n\nconst limits = (registry.context_limits || {});\nconst MAX_MD = Number(limits.specialist_lasten) || 14000;\n\nlet kadMdFull = '';\nlet metaForward = {};\nconst aggItem = $('Aggregate Markdowns').first()?.json || {};\nconst docs = Array.isArray(aggItem.docs) ? aggItem.docs : [];\nkadMdFull = docs.map((d, i) => {\n  const label = d.docType === 'bank' ? 'Bank-passeeropdracht'\n    : d.docType === 'kadaster' ? 'Kadaster eigendomsinformatie'\n    : 'Overig dossier-stuk';\n  return `=== DOCUMENT ${i + 1} — ${label} — ${d.filename || `document_${i + 1}`} ===\\n${d.markdown || ''}`;\n}).join('\\n\\n');\nmetaForward = {\n  bankDisplayName: aggItem.bankDisplayName || '',\n  zaaknummer: aggItem.zaaknummer || '',\n};\n\nconst kadMd = clamp(kadMdFull, MAX_MD);\n\nconst PATTERNS = [\n  /\\bbeslag(?:legger|gen|en)?\\b/i,\n  /(?:executoriaal|conservatoir)\\s+beslag/i,\n  /\\berfpacht/i,\n  /\\bopstalrecht\\b/i,\n  /recht\\s+van\\s+opstal/i,\n  /\\bvruchtgebruik/i,\n  /\\bhuurbeding\\b/i,\n  /\\bkettingbeding\\b/i,\n  /kwalitatieve\\s+verplichting/i,\n  /wet\\s+voorkeursrecht/i,\n  /\\bWvg\\b/,\n  /\\bvoorkeursrecht\\b/i,\n  /\\bexploitatiebijdrage\\b/i,\n  /\\bbaatbelasting\\b/i,\n  /\\bwegenfonds\\b/i,\n];\n\nconst hits = [];\nfor (const re of PATTERNS) {\n  const m = kadMdFull.match(re);\n  if (m) hits.push(m[0]);\n}\nconst signalCount = hits.length;\n\nlet chatInput;\nif (signalCount > 0) {\n  chatInput = tmpl.split('{{kadaster_markdown}}').join(kadMd);\n} else {\n  chatInput = 'Het bijgevoegde kadasterfragment bevat geen indicaties van beslagen, erfpacht, opstal, vruchtgebruik, huurbeding, kettingbeding, kwalitatieve verplichtingen of voorkeursrechten. Geef ALLEEN deze JSON terug, niets anders:\\n{\"aandachtspunten\": []}';\n}\n\nreturn {\n  json: {\n    chatInput,\n    signal_count: signalCount,\n    signal_hits: hits.slice(0, 5),\n    mode,\n    ...metaForward,\n  }\n};\n"
       },
       "id": "f3a4b5c6-0001-4f00-aaaa-a663f6aa0060",
       "name": "Build Lasten Prompt",
@@ -600,7 +540,8 @@
         "options": {
           "temperature": 0,
           "format": "json",
-          "keep_alive": "30m"
+          "keepAlive": "30m",
+          "numCtx": 8192
         }
       },
       "id": "f3a4b5c6-0003-4f00-aaaa-a663f6aa0062",
@@ -633,7 +574,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Burgerlijke-staat-specialist (unified). Werkt voor beide modes:\n//   mode='beide'   -> input via $('Build Placeholders'): structured klanten-data + markdowns\n//   mode='analyse' -> input via $('Aggregate Markdowns').docs[] (geen gestructureerde data)\nconst fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\n\nconst mode = String($('Split Input Files').first()?.json?.mode || '').trim().toLowerCase();\nconst isAnalyseMode = mode === 'analyse';\n\nlet registry;\ntry {\n  registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));\n} catch (err) {\n  throw new Error(`Kon templates-registry niet lezen (${REGISTRY_PATH}): ${err.message}`);\n}\n\nconst tmpl = String(registry.legal_specialist_prompts?.burgerlijke_staat || '');\nif (!tmpl) {\n  throw new Error('registry.json mist legal_specialist_prompts.burgerlijke_staat.');\n}\n\nfunction clamp(s, max) {\n  const txt = String(s || '');\n  if (txt.length <= max) return txt;\n  return txt.slice(0, max) + '\\n…[afgekapt voor burgerlijke-prompt]';\n}\n\nfunction clampKadMetDossierPrioriteit(full, max) {\n  const t = String(full || '');\n  if (t.length <= max) return t;\n  const marker = '\\n\\n=== Overige dossier-PDFs';\n  const ix = t.indexOf(marker);\n  if (ix < 0) return clamp(t, max);\n  const doss = t.slice(ix);\n  let prefix = t.slice(0, ix);\n  if (doss.length >= max - 96) return doss.slice(0, max - 80) + '\\n…[afgekapte dossiermarkdown]';\n  const headAvail = Math.max(0, max - doss.length);\n  if (prefix.length > headAvail - 112) {\n    prefix = prefix.slice(0, headAvail - 112) + '\\n…[kadasterkern ingekort; onderstaand dossier-/BRP-deel heeft prioriteit]';\n  }\n  let out = prefix + doss;\n  if (out.length > max) out = out.slice(0, max - 80) + '\\n…[afgekapt voor burgerlijke-prompt]';\n  return out;\n}\n\nconst limits = (registry.context_limits || {});\n\nconst MD_PATTERNS = [\n  /\\bgehuwd\\b/i, /\\bhuwelijk/i, /huwelijksgeschiedenis/i, /partnerschapsgeschiedenis/i,\n  /eerdere\\s+huwelijk/i, /eerdere\\s+relatie/i, /ontbonden\\s+huwelijk/i,\n  /betrekking\\s+tot\\s+het\\s+huwelijk/i, /vorige\\s+echtgen/i,\n  /\\b(weduwe|weduwnaar)\\b/i, /\\bpartnerschap\\b/i, /\\bgeregistreerd\\s+partn/i,\n  /\\becht(?:genoot|genote)\\b/i, /gemeen(?:schap)?\\s+van\\s+goederen/i,\n  /huwelijkse\\s+voorwaarden/i, /\\bsamenleving(?:scontract)?\\b/i,\n  /\\b(gescheiden|echtscheid|scheiding|ontbinding\\s+huwelijk)\\b/i,\n  /beëindigd\\s+geregistreerd\\s+partnerschap/i, /\\bex[- ]?(echtgenoot|partner)\\b/i,\n  /\\bboedelverdeling\\b/i, /\\bverdeling\\b/i, /\\bonverdeeld[e]?\\b/i, /\\bmede-eigenaar\\b/i,\n  /\\bBRP\\b/i, /\\bBasisregistratie\\s+Personen\\b/i,\n  /personenlijst|gezinssamenstelling|burgerlijke\\s+staat/i,\n  /huwel(?:ijk)?(?:s|\\s|\\n)*geschiedenis/i,\n  /geschiedenis(?:\\s|\\n)*(?:van\\s|\\n)*(?:het\\s)?huwelijks?(?:gemeensch)?/i,\n  /datum\\s+huwelijk|datum.*ontbind/i,\n  /\\binschrijving\\b.*\\b(gemeente|burgerlijke\\s+staat)\\b/i,\n  /Overige\\s+dossier-PDFs/i,\n];\n\nlet chatInput, signalCount, mdHits, structuredHits = 0, moreOwnersThanDebtors = 0;\nlet klantenCount = 0, kadKlantenCount = 0;\nlet metaForward = {};\n\nif (isAnalyseMode) {\n  const aggItem = $('Aggregate Markdowns').first()?.json || {};\n  const docs = Array.isArray(aggItem.docs) ? aggItem.docs : [];\n  const MAX_MD_ANALYSE = Number(limits.specialist_burgerlijke_analyse_combined) || 26000;\n  const allMdFull = docs.map((d, i) => {\n    const label = d.docType === 'bank' ? 'Bank-passeeropdracht'\n      : d.docType === 'kadaster' ? 'Kadaster eigendomsinformatie'\n      : 'Overig dossier-stuk';\n    return `=== DOCUMENT ${i + 1} — ${label} — ${d.filename || `document_${i + 1}`} ===\\n${d.markdown || ''}`;\n  }).join('\\n\\n');\n  const combinedMd = clamp(allMdFull, MAX_MD_ANALYSE);\n\n  mdHits = [];\n  for (const re of MD_PATTERNS) {\n    const m = allMdFull.match(re);\n    if (m) mdHits.push(m[0]);\n  }\n  signalCount = mdHits.length;\n\n  if (signalCount > 0) {\n    chatInput = tmpl\n      .split('{{klanten_json}}').join('[]')\n      .split('{{kadaster_klanten_json}}').join('[]')\n      .split('{{bank_markdown}}').join(combinedMd)\n      .split('{{kadaster_markdown}}').join(combinedMd);\n  } else {\n    chatInput = 'De aangeleverde stukken bevatten geen duidelijke signalen van huwelijk, partnerschap, echtscheiding, weduwe/weduwnaar of BRP-gegevens. Geef ALLEEN deze JSON terug, niets anders:\\n{\"aandachtspunten\": []}';\n  }\n\n  metaForward = {\n    bankDisplayName: aggItem.bankDisplayName || '',\n    zaaknummer: aggItem.zaaknummer || '',\n  };\n} else {\n  const placeholdersItem = $('Build Placeholders').first();\n  const meta = placeholdersItem?.json || {};\n  const input = meta.analysisInput || {};\n  const MAX_BANK = Number(limits.specialist_burgerlijke_bank) || 10000;\n  const MAX_KAD = Number(limits.specialist_burgerlijke_kadaster) || 26000;\n  const bankMdFull = String(input.bank_markdown || '');\n  const kadasterMdFull = String(input.kadaster_markdown || '');\n  const bankMd = clamp(bankMdFull, MAX_BANK);\n  const kadMd = clampKadMetDossierPrioriteit(kadasterMdFull, MAX_KAD);\n  const bank = (input.extracted && input.extracted.bank) || {};\n  const kadaster = (input.extracted && input.extracted.kadaster) || {};\n  const klanten = Array.isArray(bank.klanten) ? bank.klanten : [];\n  const kadKlanten = Array.isArray(kadaster.klanten) ? kadaster.klanten : [];\n\n  const klantenForPrompt = klanten.map((k, i) => ({\n    index: i + 1,\n    naam: k?.naam_hoofdletters || k?.volledige_naam || k?.naam || k?.initialen_naam || null,\n    burgerlijke_staat: k?.burgerlijke_staat || null,\n    nationaliteit: k?.nationaliteit || null,\n    geboorteplaats: k?.geboorteplaats || null,\n    geboorteland: k?.geboorteland || null,\n    rol: k?.rol || null,\n  }));\n  const klantenJson = JSON.stringify(klantenForPrompt, null, 2);\n\n  const kadKlantenForPrompt = kadKlanten.map((k, i) => ({\n    index: i + 1,\n    naam: k?.naam_hoofdletters || k?.volledige_naam || null,\n    voornamen: k?.voornamen || null,\n    geboorteplaats: k?.geboorteplaats || null,\n    geboorteland: k?.geboorteland || null,\n  }));\n  const kadasterKlantenJson = JSON.stringify(kadKlantenForPrompt, null, 2);\n\n  const combinedMd = `${bankMdFull}\\n\\n${kadasterMdFull}`;\n\n  mdHits = [];\n  for (const re of MD_PATTERNS) {\n    const m = combinedMd.match(re);\n    if (m) mdHits.push(m[0]);\n  }\n\n  const BS_KEYWORDS = /\\b(?:gehuwd|partnerschap|geregistreerd)\\b|\\bhuwelijk|gemeen(?:schap)?\\s+van\\s+goederen/i;\n  for (const k of klantenForPrompt) {\n    const bs = String(k.burgerlijke_staat || '');\n    if (BS_KEYWORDS.test(bs)) structuredHits++;\n    const nat = String(k.nationaliteit || '').toLowerCase();\n    const gbl = String(k.geboorteland || '').toLowerCase();\n    if (nat && nat !== 'nederland' && nat !== 'nederlandse' && nat !== 'nl') structuredHits++;\n    if (gbl && gbl !== 'nederland' && gbl !== 'nl') structuredHits++;\n  }\n\n  if (klantenForPrompt.length > 0 && kadKlantenForPrompt.length > klantenForPrompt.length) {\n    moreOwnersThanDebtors = 1;\n  }\n\n  klantenCount = klantenForPrompt.length;\n  kadKlantenCount = kadKlantenForPrompt.length;\n  signalCount = mdHits.length + structuredHits + moreOwnersThanDebtors;\n\n  if (signalCount > 0) {\n    chatInput = tmpl\n      .split('{{klanten_json}}').join(klantenJson)\n      .split('{{kadaster_klanten_json}}').join(kadasterKlantenJson)\n      .split('{{bank_markdown}}').join(bankMd)\n      .split('{{kadaster_markdown}}').join(kadMd);\n  } else {\n    chatInput =\n      'De gecombineerde stukken (passeeropdracht, kadaster/eigendom en inzage zoals BRP) bevatten geen ' +\n      'duidelijke signalen van huwelijk/partnerschap/goederenrecht, echtscheiding/partnerschapsbeëindiging, ' +\n      'verdeling, extra rechthebbenden t.o.v. schuldenaren, of buitenland. Geef ALLEEN deze JSON terug, niets anders:\\n' +\n      '{\"aandachtspunten\": []}';\n  }\n\n  metaForward = {\n    bankId: meta.bankId,\n    bankDisplayName: meta.bankDisplayName,\n    zaaknummer: meta.zaaknummer,\n  };\n}\n\nreturn {\n  json: {\n    chatInput,\n    signal_count: signalCount,\n    signal_hits_md: (mdHits || []).slice(0, 8),\n    signal_hits_structured: structuredHits,\n    more_owners_than_debtors: moreOwnersThanDebtors,\n    klanten_count: klantenCount,\n    kadaster_klanten_count: kadKlantenCount,\n    mode,\n    ...metaForward,\n  }\n};\n"
+        "jsCode": "// Burgerlijke-staat-specialist. Draait in mode='analyse'; input via $('Aggregate Markdowns').docs[] (geen gestructureerde extractie).\nconst fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\n\nconst mode = String($('Split Input Files').first()?.json?.mode || '').trim().toLowerCase();\n\nlet registry;\ntry {\n  registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));\n} catch (err) {\n  throw new Error(`Kon templates-registry niet lezen (${REGISTRY_PATH}): ${err.message}`);\n}\n\nconst tmpl = String(registry.legal_specialist_prompts?.burgerlijke_staat || '');\nif (!tmpl) {\n  throw new Error('registry.json mist legal_specialist_prompts.burgerlijke_staat.');\n}\n\nfunction clamp(s, max) {\n  const txt = String(s || '');\n  if (txt.length <= max) return txt;\n  return txt.slice(0, max) + '\\n…[afgekapt voor burgerlijke-prompt]';\n}\n\nfunction clampKadMetDossierPrioriteit(full, max) {\n  const t = String(full || '');\n  if (t.length <= max) return t;\n  const marker = '\\n\\n=== Overige dossier-PDFs';\n  const ix = t.indexOf(marker);\n  if (ix < 0) return clamp(t, max);\n  const doss = t.slice(ix);\n  let prefix = t.slice(0, ix);\n  if (doss.length >= max - 96) return doss.slice(0, max - 80) + '\\n…[afgekapte dossiermarkdown]';\n  const headAvail = Math.max(0, max - doss.length);\n  if (prefix.length > headAvail - 112) {\n    prefix = prefix.slice(0, headAvail - 112) + '\\n…[kadasterkern ingekort; onderstaand dossier-/BRP-deel heeft prioriteit]';\n  }\n  let out = prefix + doss;\n  if (out.length > max) out = out.slice(0, max - 80) + '\\n…[afgekapt voor burgerlijke-prompt]';\n  return out;\n}\n\nconst limits = (registry.context_limits || {});\n\nconst MD_PATTERNS = [\n  /\\bgehuwd\\b/i, /\\bhuwelijk/i, /huwelijksgeschiedenis/i, /partnerschapsgeschiedenis/i,\n  /eerdere\\s+huwelijk/i, /eerdere\\s+relatie/i, /ontbonden\\s+huwelijk/i,\n  /betrekking\\s+tot\\s+het\\s+huwelijk/i, /vorige\\s+echtgen/i,\n  /\\b(weduwe|weduwnaar)\\b/i, /\\bpartnerschap\\b/i, /\\bgeregistreerd\\s+partn/i,\n  /\\becht(?:genoot|genote)\\b/i, /gemeen(?:schap)?\\s+van\\s+goederen/i,\n  /huwelijkse\\s+voorwaarden/i, /\\bsamenleving(?:scontract)?\\b/i,\n  /\\b(gescheiden|echtscheid|scheiding|ontbinding\\s+huwelijk)\\b/i,\n  /beëindigd\\s+geregistreerd\\s+partnerschap/i, /\\bex[- ]?(echtgenoot|partner)\\b/i,\n  /\\bboedelverdeling\\b/i, /\\bverdeling\\b/i, /\\bonverdeeld[e]?\\b/i, /\\bmede-eigenaar\\b/i,\n  /\\bBRP\\b/i, /\\bBasisregistratie\\s+Personen\\b/i,\n  /personenlijst|gezinssamenstelling|burgerlijke\\s+staat/i,\n  /huwel(?:ijk)?(?:s|\\s|\\n)*geschiedenis/i,\n  /geschiedenis(?:\\s|\\n)*(?:van\\s|\\n)*(?:het\\s)?huwelijks?(?:gemeensch)?/i,\n  /datum\\s+huwelijk|datum.*ontbind/i,\n  /\\binschrijving\\b.*\\b(gemeente|burgerlijke\\s+staat)\\b/i,\n  /Overige\\s+dossier-PDFs/i,\n];\n\nlet chatInput, signalCount, mdHits, structuredHits = 0, moreOwnersThanDebtors = 0;\nlet klantenCount = 0, kadKlantenCount = 0;\nlet metaForward = {};\n\nconst aggItem = $('Aggregate Markdowns').first()?.json || {};\nconst docs = Array.isArray(aggItem.docs) ? aggItem.docs : [];\nconst MAX_MD_ANALYSE = Number(limits.specialist_burgerlijke_analyse_combined) || 26000;\nconst allMdFull = docs.map((d, i) => {\n  const label = d.docType === 'bank' ? 'Bank-passeeropdracht'\n    : d.docType === 'kadaster' ? 'Kadaster eigendomsinformatie'\n    : 'Overig dossier-stuk';\n  return `=== DOCUMENT ${i + 1} — ${label} — ${d.filename || `document_${i + 1}`} ===\\n${d.markdown || ''}`;\n}).join('\\n\\n');\nconst combinedMd = clamp(allMdFull, MAX_MD_ANALYSE);\n\nmdHits = [];\nfor (const re of MD_PATTERNS) {\n  const m = allMdFull.match(re);\n  if (m) mdHits.push(m[0]);\n}\nsignalCount = mdHits.length;\n\nif (signalCount > 0) {\n  chatInput = tmpl\n    .split('{{klanten_json}}').join('[]')\n    .split('{{kadaster_klanten_json}}').join('[]')\n    .split('{{bank_markdown}}').join(combinedMd)\n    .split('{{kadaster_markdown}}').join('(alle aangeleverde stukken \\u2014 bank, kadaster en inzage \\u2014 staan hierboven in het gecombineerde blok)');\n} else {\n  chatInput = 'De aangeleverde stukken bevatten geen duidelijke signalen van huwelijk, partnerschap, echtscheiding, weduwe/weduwnaar of BRP-gegevens. Geef ALLEEN deze JSON terug, niets anders:\\n{\"aandachtspunten\": []}';\n}\n\nmetaForward = {\n  bankDisplayName: aggItem.bankDisplayName || '',\n  zaaknummer: aggItem.zaaknummer || '',\n};\n\nreturn {\n  json: {\n    chatInput,\n    signal_count: signalCount,\n    signal_hits_md: (mdHits || []).slice(0, 8),\n    signal_hits_structured: structuredHits,\n    more_owners_than_debtors: moreOwnersThanDebtors,\n    klanten_count: klantenCount,\n    kadaster_klanten_count: kadKlantenCount,\n    mode,\n    ...metaForward,\n  }\n};\n"
       },
       "id": "a4b5c6d7-0001-4f00-aaaa-a663f6aa0070",
       "name": "Build Burgerlijke Prompt",
@@ -694,7 +635,8 @@
         "options": {
           "temperature": 0,
           "format": "json",
-          "keep_alive": "30m"
+          "keepAlive": "30m",
+          "numCtx": 8192
         }
       },
       "id": "a4b5c6d7-0003-4f00-aaaa-a663f6aa0072",
@@ -727,7 +669,165 @@
     },
     {
       "parameters": {
-        "jsCode": "// Bouwt de webhook-respons voor mode='akte' (geen juridische analyse).\n// Ook gebruikt als fallback voor onbekende mode-waarden uit Analyse Route\n// (zie options.fallbackOutput): in dat geval bevat de respons een 'warning'.\nconst akteNode = $('Generate DOCX').first()?.json || {};\nconst akteStdout = String(akteNode.stdout || '');\nconst akteMatch = akteStdout.match(/SUCCESS:\\s*(.+)/);\nconst aktePath = akteMatch ? akteMatch[1].trim() : '';\nif (!aktePath) {\n  throw new Error(`Geen SUCCESS pad gevonden in akte-output: ${akteStdout}`);\n}\nconst akteFilename = aktePath.split('/').pop();\n\n// REPLACED_BLOCKS = 0 betekent dat het Python-script geen enkele\n// placeholder kon vervangen. Meestal duidt dat op een template/registry\n// mismatch (placeholder-naam fout gespeld, of verkeerd bank-template).\n// We falen niet — de .docx bestaat — maar geven de notaris een\n// duidelijke waarschuwing.\nconst replacedMatch = akteStdout.match(/REPLACED_BLOCKS:\\s*(\\d+)/);\nconst replacedBlocks = replacedMatch ? parseInt(replacedMatch[1], 10) : null;\n\nconst placeholdersNode = $('Build Placeholders').first()?.json || {};\nconst inputMode = String($('Split Input Files').first()?.json?.mode || '').trim();\nconst KNOWN = new Set(['akte', 'beide', 'analyse']);\nconst warning = KNOWN.has(inputMode)\n  ? null\n  : `Onbekende mode '${inputMode || '(leeg)'}' ontvangen op de webhook; verwerkt als 'akte'. Toegestane waarden: akte, beide, analyse.`;\nconst template_warning = replacedBlocks === 0\n  ? `Python script meldde REPLACED_BLOCKS=0: geen placeholders vervangen in template '${placeholdersNode.bankId || '?'}'. Controleer of de template en de registry-placeholder-tags overeenkomen.`\n  : null;\n\nreturn [{\n  json: {\n    success: true,\n    mode: 'akte',\n    warning,\n    template_warning,\n    replaced_blocks: replacedBlocks,\n    filename: akteFilename,\n    file_path: aktePath,\n    download_url: `http://localhost:8080/output/${akteFilename}`,\n    bank_id: placeholdersNode.bankId || null,\n    bank_display_name: placeholdersNode.bankDisplayName || null,\n    klant_samenvatting: placeholdersNode.klantSamenvatting || '',\n    zaaknummer: placeholdersNode.zaaknummer || '',\n    analysis: null\n  }\n}];"
+        "jsCode": "// Object&partijen-specialist (mode=analyse). Combineert een deterministische\n// ruggengraat met LLM-nuance:\n//   - deterministische mismatch-checks op de structured extractie\n//     (Parse Partijen Extractie): klantentelling, achternaam per positie,\n//     onderpand-woonplaats vs. kadastrale gemeente — altijd gerapporteerd;\n//   - een LLM-beoordeling over de ruwe markdown voor nuance (verkeerd object,\n//     spellingsvarianten) — alleen wanneer bank + kadaster beide aanwezig zijn.\nconst fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\n\nconst mode = String($('Split Input Files').first()?.json?.mode || '').trim().toLowerCase();\n\nlet registry;\ntry { registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8')); }\ncatch (err) { throw new Error(`Kon templates-registry niet lezen (${REGISTRY_PATH}): ${err.message}`); }\nconst tmpl = String(registry.legal_specialist_prompts?.object_partijen || '');\nif (!tmpl) throw new Error('registry.json mist legal_specialist_prompts.object_partijen.');\n\nconst limits = registry.context_limits || {};\nfunction clamp(s, max) { const t = String(s || ''); return t.length <= max ? t : t.slice(0, max) + '\\n…[afgekapt voor partijen-prompt]'; }\nconst MAX_BANK = Number(limits.specialist_partijen_bank) || 10000;\nconst MAX_KAD = Number(limits.specialist_partijen_kadaster) || 14000;\n\nconst agg = $('Aggregate Markdowns').first()?.json || {};\nconst docs = Array.isArray(agg.docs) ? agg.docs : [];\nconst bankMdFull = docs.filter((d) => d.docType === 'bank').map((d) => d.markdown || '').join('\\n\\n');\nconst kadMdFull = docs.filter((d) => d.docType === 'kadaster').map((d) => d.markdown || '').join('\\n\\n');\n\nlet extracted = {};\ntry { extracted = $('Parse Partijen Extractie').first()?.json?.partijen_extracted || {}; } catch (_) {}\nconst bankKlanten = Array.isArray(extracted.bank_klanten) ? extracted.bank_klanten : [];\nconst kadKlanten = Array.isArray(extracted.kadaster_klanten) ? extracted.kadaster_klanten : [];\n\n// --- deterministische checks (overgenomen uit Deterministic Checks, akte-flow) ---\nfunction stripAccents(s) { return String(s || '').normalize('NFKD').replace(/[\\u0300-\\u036f]/g, ''); }\nfunction normName(s) { return stripAccents(s).toLowerCase().replace(/[^a-z]/g, ''); }\nfunction normWord(s) { return stripAccents(s).toLowerCase().replace(/[^a-z0-9]/g, ''); }\nfunction lastSurnameToken(s) {\n  const cleaned = String(s || '').replace(/[,.;]/g, ' ').replace(/\\s+/g, ' ').trim();\n  if (!cleaned) return '';\n  const parts = cleaned.split(' ').filter(Boolean);\n  return normName(parts[parts.length - 1] || '');\n}\n\nconst detFindings = [];\nif (bankKlanten.length > 0 && kadKlanten.length > 0 && bankKlanten.length !== kadKlanten.length) {\n  detFindings.push({\n    id: 'partijen-klantentelling-mismatch', ernst: 'kritiek', categorie: 'Object en partijen',\n    titel: 'Aantal cliënten wijkt af van aantal rechthebbenden',\n    constatering: `Passeeropdracht noemt ${bankKlanten.length} cliënt(en); Kadaster vermeldt ${kadKlanten.length} rechthebbende(n).`,\n    juridisch_kader: 'Schuldenaren in de hypotheekakte moeten in beginsel gelijk zijn aan de rechthebbenden op het onderpand. Afwijking duidt op (gelijktijdige) overdracht, vererving of een ontbrekende partij.',\n    actie: 'Verifieer of een eigendomsoverdracht gelijktijdig passeert, of dat een rechthebbende ontbreekt in een van de stukken.',\n    bronnen: ['passeeropdracht', 'kadaster']\n  });\n}\nconst pairs = Math.min(bankKlanten.length, kadKlanten.length);\nfor (let i = 0; i < pairs; i++) {\n  const bRaw = String(bankKlanten[i]?.naam || '');\n  const kRaw = String(kadKlanten[i]?.naam || '');\n  const bLast = lastSurnameToken(bRaw);\n  const kLast = lastSurnameToken(kRaw);\n  if (!bLast || !kLast) continue;\n  if (bLast === kLast) continue;\n  if (bLast.includes(kLast) || kLast.includes(bLast)) continue;\n  detFindings.push({\n    id: `partijen-naam-mismatch-${i + 1}`, ernst: 'kritiek', categorie: 'Object en partijen',\n    titel: `Achternaam cliënt ${i + 1} verschilt tussen bank en kadaster`,\n    constatering: `Passeeropdracht: \"${bRaw}\". Kadaster: \"${kRaw}\". Achternamen komen niet overeen.`,\n    juridisch_kader: 'De rechthebbende op het onderpand moet de hypotheek vestigen. Naamverschil kan duiden op naamswijziging, vererving of een geplande eigendomsoverdracht.',\n    actie: 'Vergelijk met BRP/legitimatie; vraag indien nodig verklaring van erfrecht, koopakte of huwelijksakte op.',\n    bronnen: ['passeeropdracht', 'kadaster']\n  });\n}\nconst bankWoon = normWord(extracted.onderpand_woonplaats);\nconst kadGem = normWord(extracted.kadastrale_gemeente);\nif (bankWoon && kadGem && bankWoon !== kadGem && !bankWoon.includes(kadGem) && !kadGem.includes(bankWoon)) {\n  detFindings.push({\n    id: 'partijen-onderpand-gemeente-mismatch', ernst: 'aandacht', categorie: 'Object en partijen',\n    titel: 'Onderpand-woonplaats wijkt af van kadastrale gemeente',\n    constatering: `Passeeropdracht onderpand-woonplaats: \"${extracted.onderpand_woonplaats || ''}\". Kadastrale gemeente: \"${extracted.kadastrale_gemeente || ''}\".`,\n    juridisch_kader: 'Het onderpand in de akte moet ondubbelzinnig het kadastrale perceel zijn. Verschil kan duiden op gemeentelijke herindeling — of een verkeerd perceel.',\n    actie: 'Verifieer of woonplaats en kadastrale gemeente hetzelfde perceel betreffen (herindeling toegestaan; verkeerd perceel niet).',\n    bronnen: ['passeeropdracht', 'kadaster']\n  });\n}\n\n// --- LLM-prompt (nuance); alleen als bank + kadaster beide aanwezig ---\nconst onderpand = { straat: extracted.onderpand_straat || null, woonplaats: extracted.onderpand_woonplaats || null };\nconst kadObject = { gemeente: extracted.kadastrale_gemeente || null, sectie: extracted.kadastrale_sectie || null, nummer: extracted.kadastrale_nummer || null };\nconst hasBoth = Boolean(bankMdFull) && Boolean(kadMdFull);\nconst signalCount = hasBoth ? 1 : 0;\n\nlet chatInput;\nif (signalCount > 0) {\n  chatInput = tmpl\n    .split('{{klanten_json}}').join(JSON.stringify(bankKlanten, null, 2))\n    .split('{{kadaster_klanten_json}}').join(JSON.stringify(kadKlanten, null, 2))\n    .split('{{onderpand_json}}').join(JSON.stringify(onderpand, null, 2))\n    .split('{{kadaster_object_json}}').join(JSON.stringify(kadObject, null, 2))\n    .split('{{bank_markdown}}').join(clamp(bankMdFull, MAX_BANK))\n    .split('{{kadaster_markdown}}').join(clamp(kadMdFull, MAX_KAD));\n} else {\n  chatInput = 'Geen bank- én kadasterdocument beschikbaar om cliënten/object te vergelijken. Geef ALLEEN deze JSON terug, niets anders:\\n{\"aandachtspunten\": []}';\n}\n\nreturn {\n  json: {\n    chatInput,\n    signal_count: signalCount,\n    det_findings: detFindings,\n    bank_klanten_count: bankKlanten.length,\n    kadaster_klanten_count: kadKlanten.length,\n    mode,\n    bankDisplayName: agg.bankDisplayName || '',\n    zaaknummer: agg.zaaknummer || '',\n  }\n};"
+      },
+      "id": "b8c9d0e1-0001-4f00-aaaa-a663f6aa0080",
+      "name": "Build Partijen Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2500,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "b8c9d0e1-0005-cond-partijen",
+              "leftValue": "={{ $json.signal_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b8c9d0e1-0005-4f00-aaaa-a663f6aa0084",
+      "name": "Partijen Has Signals?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2680,
+        500
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "b8c9d0e1-0002-4f00-aaaa-a663f6aa0081",
+      "name": "Partijen LLM Chain",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        2860,
+        500
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": "qwen2.5:7b",
+        "options": {
+          "temperature": 0,
+          "format": "json",
+          "keepAlive": "30m",
+          "numCtx": 8192
+        }
+      },
+      "id": "b8c9d0e1-0003-4f00-aaaa-a663f6aa0082",
+      "name": "Partijen Ollama Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        2860,
+        320
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "xHuYe0MDGOs9IpBW",
+          "name": "Local Ollama service"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parseert de LLM-output van de Object&partijen-specialist en voegt die samen\n// met de deterministische bevindingen (det_findings uit Build Partijen Prompt).\n// De deterministische bevindingen verschijnen ALTIJD (harde feiten); de\n// LLM-bevindingen alleen wanneer de LLM draaide. Per onderwerp wint de\n// deterministische bevinding, zodat er geen dubbele aandachtspunten ontstaan.\nfunction extractText(j) {\n  if (!j || typeof j !== 'object') return '';\n  if (typeof j.text === 'string' && j.text) return j.text;\n  if (typeof j.output === 'string' && j.output) return j.output;\n  if (typeof j.answer === 'string' && j.answer) return j.answer;\n  if (typeof j.response === 'string' && j.response) return j.response;\n  if (typeof j?.message?.content === 'string' && j.message.content) return j.message.content;\n  return '';\n}\nfunction unwrapJsonLike(s) {\n  let t = String(s || '').trim();\n  const fence = /^```(?:json)?\\s*\\r?\\n?([\\s\\S]*?)\\r?\\n?```$/im;\n  const m = t.match(fence);\n  if (m) return m[1].trim();\n  if (t.startsWith('```')) t = t.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/i, '');\n  return t.trim();\n}\nfunction parseSpec(node) {\n  const raw = extractText(node).trim();\n  if (raw) {\n    try { return JSON.parse(unwrapJsonLike(raw)); } catch {}\n    const m = raw.match(/\\{[\\s\\S]*\\}/);\n    if (m) { try { return JSON.parse(m[0]); } catch {} }\n  }\n  const META = new Set(['pairedItem', 'sourceData', '$node']);\n  const obj = {};\n  for (const k of Object.keys(node || {})) {\n    if (!META.has(k) && !k.startsWith('_')) obj[k] = node[k];\n  }\n  return obj;\n}\nfunction normaliseBronnen(bron) {\n  const ALLOWED = new Set(['passeeropdracht', 'kadaster']);\n  const ALIASES = { eigendom: 'kadaster', eigendomsinformatie: 'kadaster', kadaster: 'kadaster', passeeropdracht: 'passeeropdracht', hypotheekopdracht: 'passeeropdracht', bank: 'passeeropdracht' };\n  if (!Array.isArray(bron)) return ['passeeropdracht'];\n  const out = [];\n  for (const b of bron) {\n    const k = String(b).toLowerCase().trim().replace(/\\s+/g, '');\n    const mapped = ALIASES[k] || (ALLOWED.has(k) ? k : null);\n    if (mapped && !out.includes(mapped)) out.push(mapped);\n  }\n  return out.length ? out : ['passeeropdracht'];\n}\n// Grof onderwerp-label om deterministische en LLM-bevindingen over hetzelfde\n// thema te ontdubbelen (deterministisch wint).\nfunction topicKey(ap) {\n  const s = `${ap?.id || ''} ${ap?.titel || ''} ${ap?.constatering || ''}`.toLowerCase();\n  if (/aantal|telling|rechthebbende.*(schuldena|cli[eë]nt)|(schuldena|cli[eë]nt).*rechthebbende/.test(s)) return 'aantal';\n  if (/achternaam|naamsverschil|naam.*(verschil|wijk|niet overeen)|(verschil|wijk).*naam/.test(s)) return 'naam';\n  if (/gemeente|woonplaats|perceel|kadastrale aanduiding|verkeerd object|ander object|sectie|onderpand/.test(s)) return 'object';\n  return `uniq:${ap?.id || Math.random()}`;\n}\n\nconst node = $input.all()[0]?.json || {};\n\nlet det = [];\nlet signalCount = 0;\ntry {\n  const bp = $('Build Partijen Prompt').first()?.json;\n  if (Array.isArray(bp?.det_findings)) det = bp.det_findings;\n  if (typeof bp?.signal_count === 'number') signalCount = bp.signal_count;\n} catch (_) {}\n\nlet llm = [];\nif (signalCount > 0) {\n  let parsed = parseSpec(node);\n  if (!parsed || typeof parsed !== 'object') parsed = { aandachtspunten: [] };\n  const WRAPPER_KEYS = new Set(['analyse', 'analysis', 'data', 'response', 'result', 'output', 'object_partijen', 'partijen']);\n  let depth = 0;\n  while (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.keys(parsed).length === 1 && WRAPPER_KEYS.has(Object.keys(parsed)[0]) && depth < 3) {\n    parsed = parsed[Object.keys(parsed)[0]];\n    depth++;\n  }\n  const aandacht = Array.isArray(parsed.aandachtspunten) ? parsed.aandachtspunten : [];\n  const ALLOWED = new Set(['kritiek', 'aandacht', 'info']);\n  const ALIASES = { critical: 'kritiek', blokkerend: 'kritiek', warning: 'aandacht', warn: 'aandacht', notice: 'info', informatief: 'info' };\n  llm = aandacht.slice(0, 4).map((ap, i) => {\n    const e = String(ap?.ernst || '').trim().toLowerCase();\n    const ernst = ALLOWED.has(e) ? e : (ALIASES[e] || 'aandacht');\n    const idRaw = String(ap?.id || '').trim();\n    const id = idRaw ? (idRaw.startsWith('partijen-') ? idRaw : `partijen-${idRaw}`) : `partijen-llm-${i + 1}`;\n    return {\n      id, ernst, categorie: 'Object en partijen',\n      titel: String(ap?.titel || '').slice(0, 160),\n      constatering: String(ap?.constatering || ''),\n      juridisch_kader: String(ap?.juridisch_kader || ''),\n      actie: String(ap?.actie || ''),\n      bronnen: normaliseBronnen(ap?.bronnen)\n    };\n  });\n}\n\n// Merge: deterministisch eerst (wint per onderwerp), dan LLM. Dedupe op\n// onderwerp-label én op id.\nconst seenTopic = new Set();\nconst seenId = new Set();\nconst merged = [];\nfor (const ap of [...det, ...llm]) {\n  const id = String(ap?.id || '').trim();\n  if (id && seenId.has(id)) continue;\n  const tk = topicKey(ap);\n  if (seenTopic.has(tk)) continue;\n  if (id) seenId.add(id);\n  seenTopic.add(tk);\n  merged.push(ap);\n}\n\nreturn [{ json: { partijen_aandachtspunten: merged, signal_count: signalCount, deterministic_count: det.length } }];"
+      },
+      "id": "b8c9d0e1-0004-4f00-aaaa-a663f6aa0083",
+      "name": "Parse Partijen JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3040,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Structured-extractie voor de Object&partijen-specialist (mode=analyse).\n// Haalt uit de ruwe markdown van bank + kadaster de minimale gestructureerde\n// data (klanten/onderpand/kadastrale aanduiding) die de deterministische\n// mismatch-checks nodig hebben. De analyse-flow kent zelf geen extractie.\nconst fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\nlet registry;\ntry { registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8')); }\ncatch (err) { throw new Error(`Kon templates-registry niet lezen (${REGISTRY_PATH}): ${err.message}`); }\n\nconst tmpl = String(registry.partijen_extraction_prompt || '');\nif (!tmpl) throw new Error('registry.json mist partijen_extraction_prompt.');\n\nconst limits = registry.context_limits || {};\nconst MAX = Number(limits.specialist_partijen_analyse_combined) || 26000;\nfunction clamp(s, max) {\n  const t = String(s || '');\n  return t.length <= max ? t : t.slice(0, max) + '\\n…[afgekapt voor partijen-extractie]';\n}\n\nconst agg = $('Aggregate Markdowns').first()?.json || {};\nconst docs = Array.isArray(agg.docs) ? agg.docs : [];\nconst bankMd = docs.filter((d) => d.docType === 'bank').map((d) => d.markdown || '').join('\\n\\n');\nconst kadMd = docs.filter((d) => d.docType === 'kadaster').map((d) => d.markdown || '').join('\\n\\n');\nconst hasBoth = Boolean(bankMd) && Boolean(kadMd);\n\nconst chatInput = hasBoth\n  ? tmpl.split('{{bank_markdown}}').join(clamp(bankMd, MAX)).split('{{kadaster_markdown}}').join(clamp(kadMd, MAX))\n  : 'Geen bank- én kadasterdocument beschikbaar om te vergelijken. Geef ALLEEN deze JSON terug:\\n{\"bank_klanten\": [], \"onderpand_straat\": \"\", \"onderpand_woonplaats\": \"\", \"kadaster_klanten\": [], \"kadastrale_gemeente\": \"\", \"kadastrale_sectie\": \"\", \"kadastrale_nummer\": \"\"}';\n\nreturn { json: { chatInput, has_both: hasBoth } };"
+      },
+      "id": "c9d0e1f2-0001-4f00-aaaa-a663f6aa0090",
+      "name": "Build Partijen Extractie Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1960,
+        640
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "c9d0e1f2-0002-4f00-aaaa-a663f6aa0091",
+      "name": "Partijen Extractie LLM Chain",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        2140,
+        640
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": "qwen2.5:7b",
+        "options": {
+          "temperature": 0,
+          "format": "json",
+          "keepAlive": "30m",
+          "numCtx": 8192
+        }
+      },
+      "id": "c9d0e1f2-0003-4f00-aaaa-a663f6aa0092",
+      "name": "Partijen Extractie Ollama Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        2140,
+        820
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "xHuYe0MDGOs9IpBW",
+          "name": "Local Ollama service"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parseert de structured-extractie voor de Object&partijen-specialist tot\n// { partijen_extracted: {bank_klanten[], kadaster_klanten[], onderpand_*, kadastrale_*} }.\n// LET OP: een Ollama-model met format:json levert de JSON vaak als top-level\n// velden op het item (niet als string onder .text). Daarom valt de parser\n// terug op de eigen keys van het node als er geen tekststring is.\nfunction extractText(j) {\n  if (!j || typeof j !== 'object') return '';\n  if (typeof j.text === 'string' && j.text) return j.text;\n  if (typeof j.output === 'string' && j.output) return j.output;\n  if (typeof j.answer === 'string' && j.answer) return j.answer;\n  if (typeof j.response === 'string' && j.response) return j.response;\n  if (typeof j?.message?.content === 'string' && j.message.content) return j.message.content;\n  return '';\n}\nfunction unwrapJsonLike(s) {\n  let t = String(s || '').trim();\n  const fence = /^```(?:json)?\\s*\\r?\\n?([\\s\\S]*?)\\r?\\n?```$/im;\n  const m = t.match(fence);\n  if (m) return m[1].trim();\n  if (t.startsWith('```')) t = t.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/i, '');\n  return t.trim();\n}\nfunction tryParse(node) {\n  const raw = extractText(node).trim();\n  if (raw) {\n    try { return JSON.parse(unwrapJsonLike(raw)); } catch {}\n    const m = raw.match(/\\{[\\s\\S]*\\}/);\n    if (m) { try { return JSON.parse(m[0]); } catch {} }\n  }\n  // Fallback: JSON zit al als top-level velden op het item (format:json).\n  const META = new Set(['pairedItem', 'sourceData', '$node']);\n  const obj = {};\n  for (const k of Object.keys(node || {})) {\n    if (!META.has(k) && !k.startsWith('_')) obj[k] = node[k];\n  }\n  return obj;\n}\nfunction arr(x) { return Array.isArray(x) ? x : []; }\n// Schoont een naam: strip alles vanaf een komma of ' geboren' (geboortedatum-\n// ruis), en veelvoorkomende aanhef, zodat de achternaam-vergelijking klopt.\nfunction cleanName(s) {\n  return String((s && (s.naam ?? s)) || '')\n    .split(/,| geboren /i)[0]\n    .replace(/\\b(mevrouw|mevr|de\\s+heer|dhr|mw|hr)\\b\\.?/gi, '')\n    .replace(/^[\\s.,;-]+/, '')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nconst node = $input.all()[0]?.json || {};\nlet p = tryParse(node);\nif (!p || typeof p !== 'object' || Array.isArray(p)) p = {};\n\nconst extracted = {\n  bank_klanten: arr(p.bank_klanten).map((k) => ({ naam: cleanName(k) })).filter((k) => k.naam),\n  kadaster_klanten: arr(p.kadaster_klanten).map((k) => ({ naam: cleanName(k) })).filter((k) => k.naam),\n  onderpand_straat: String(p.onderpand_straat || ''),\n  onderpand_woonplaats: String(p.onderpand_woonplaats || ''),\n  kadastrale_gemeente: String(p.kadastrale_gemeente || ''),\n  kadastrale_sectie: String(p.kadastrale_sectie || ''),\n  kadastrale_nummer: String(p.kadastrale_nummer || ''),\n};\nreturn [{ json: { partijen_extracted: extracted } }];"
+      },
+      "id": "c9d0e1f2-0004-4f00-aaaa-a663f6aa0093",
+      "name": "Parse Partijen Extractie",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2320,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Bouwt de webhook-respons voor mode='akte' (geen juridische analyse).\n// Ook het eindpunt voor onbekende mode-waarden (Mode Route stuurt alles\n// wat niet 'analyse' is hierheen): in dat geval bevat de respons een 'warning'.\nconst akteNode = $('Generate DOCX').first()?.json || {};\nconst akteStdout = String(akteNode.stdout || '');\nconst akteMatch = akteStdout.match(/SUCCESS:\\s*(.+)/);\nconst aktePath = akteMatch ? akteMatch[1].trim() : '';\nif (!aktePath) {\n  throw new Error(`Geen SUCCESS pad gevonden in akte-output: ${akteStdout}`);\n}\nconst akteFilename = aktePath.split('/').pop();\n\n// REPLACED_BLOCKS = 0 betekent dat het Python-script geen enkele\n// placeholder kon vervangen. Meestal duidt dat op een template/registry\n// mismatch (placeholder-naam fout gespeld, of verkeerd bank-template).\n// We falen niet — de .docx bestaat — maar geven de notaris een\n// duidelijke waarschuwing.\nconst replacedMatch = akteStdout.match(/REPLACED_BLOCKS:\\s*(\\d+)/);\nconst replacedBlocks = replacedMatch ? parseInt(replacedMatch[1], 10) : null;\n\nconst placeholdersNode = $('Build Placeholders').first()?.json || {};\nconst inputMode = String($('Split Input Files').first()?.json?.mode || '').trim();\nconst KNOWN = new Set(['akte', 'analyse']);\nconst warning = KNOWN.has(inputMode)\n  ? null\n  : `Onbekende mode '${inputMode || '(leeg)'}' ontvangen op de webhook; verwerkt als 'akte'. Toegestane waarden: akte, analyse.`;\nconst template_warning = replacedBlocks === 0\n  ? `Python script meldde REPLACED_BLOCKS=0: geen placeholders vervangen in template '${placeholdersNode.bankId || '?'}'. Controleer of de template en de registry-placeholder-tags overeenkomen.`\n  : null;\n\nreturn [{\n  json: {\n    success: true,\n    mode: 'akte',\n    warning,\n    template_warning,\n    replaced_blocks: replacedBlocks,\n    filename: akteFilename,\n    file_path: aktePath,\n    download_url: `http://localhost:8080/output/${akteFilename}`,\n    bank_id: placeholdersNode.bankId || null,\n    bank_display_name: placeholdersNode.bankDisplayName || null,\n    klant_samenvatting: placeholdersNode.klantSamenvatting || '',\n    zaaknummer: placeholdersNode.zaaknummer || '',\n    analysis: null\n  }\n}];"
       },
       "id": "c0a1b2c3-0010-4f00-aaaa-a663f6aa0029",
       "name": "Build Response (akte only)",
@@ -769,72 +869,9 @@
     },
     {
       "parameters": {
-        "rules": {
-          "values": [
-            {
-              "conditions": {
-                "options": {
-                  "caseSensitive": true,
-                  "leftValue": "",
-                  "typeValidation": "loose"
-                },
-                "conditions": [
-                  {
-                    "id": "spec-route-analyse",
-                    "leftValue": "={{ $('Split Input Files').first().json.mode }}",
-                    "rightValue": "analyse",
-                    "operator": {
-                      "type": "string",
-                      "operation": "equals"
-                    }
-                  }
-                ],
-                "combinator": "and"
-              },
-              "renameOutput": true,
-              "outputKey": "analyse"
-            },
-            {
-              "conditions": {
-                "options": {
-                  "caseSensitive": true,
-                  "leftValue": "",
-                  "typeValidation": "loose"
-                },
-                "conditions": [
-                  {
-                    "id": "spec-route-beide",
-                    "leftValue": "={{ $('Split Input Files').first().json.mode }}",
-                    "rightValue": "analyse",
-                    "operator": {
-                      "type": "string",
-                      "operation": "notEquals"
-                    }
-                  }
-                ],
-                "combinator": "and"
-              },
-              "renameOutput": true,
-              "outputKey": "beide"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "e1f2a3b4-9999-4f00-cccc-a663f6aa0500",
-      "name": "Specialist Route",
-      "type": "n8n-nodes-base.switch",
-      "typeVersion": 3.2,
-      "position": [
-        3660,
-        -100
-      ]
-    },
-    {
-      "parameters": {
         "mode": "combine",
         "combineBy": "combineByPosition",
-        "numberInputs": 3,
+        "numberInputs": 4,
         "options": {}
       },
       "id": "merge-specialists-001",
@@ -848,7 +885,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Aggregates results from the 3 parallel specialist agents into a single\n// 'message to a node' payload. Each agent reports: did the LLM run, did it\n// find anything, how many aandachtspunten, and the raw findings array.\n// Downstream (Specialist Route → Build Analysis Prompt / Build Flex Analysis\n// Prompt) reads the actual aandachtspunten via cross-node refs to the\n// existing Parse * JSON nodes.\nfunction reportFor(name, prefix, parseNodeName) {\n  let data;\n  try { data = $(parseNodeName).first()?.json || {}; }\n  catch (_) { data = {}; }\n  const findings = Array.isArray(data[`${prefix}_aandachtspunten`])\n    ? data[`${prefix}_aandachtspunten`]\n    : [];\n  const signal = typeof data.signal_count === 'number' ? data.signal_count : null;\n  return {\n    name,\n    found: findings.length > 0,\n    count: findings.length,\n    signal_count: signal,\n    ran_llm: signal === null ? null : signal > 0,\n  };\n}\n\nconst vererving = reportFor('vererving', 'vererving', 'Parse Vererving JSON');\nconst lasten = reportFor('lasten', 'lasten', 'Parse Lasten JSON');\nconst burgerlijke = reportFor('burgerlijke', 'burgerlijke', 'Parse Burgerlijke JSON');\n\nconst reports = [vererving, lasten, burgerlijke];\nconst totalFindings = reports.reduce((sum, r) => sum + r.count, 0);\nconst ranLlmCount = reports.filter((r) => r.ran_llm === true).length;\n\nreturn [{\n  json: {\n    specialists: { vererving, lasten, burgerlijke },\n    summary: {\n      total_findings: totalFindings,\n      specialists_with_findings: reports.filter((r) => r.found).length,\n      llm_calls_made: ranLlmCount,\n      llm_calls_skipped: reports.length - ranLlmCount,\n    },\n  },\n}];\n"
+        "jsCode": "// Aggregates results from the 4 parallel specialist agents into a single\n// 'message to a node' payload. Each agent reports: did the LLM run, did it\n// find anything, how many aandachtspunten, and the raw findings array.\n// Downstream (Specialist Route → Build Analysis Prompt / Build Flex Analysis\n// Prompt) reads the actual aandachtspunten via cross-node refs to the\n// existing Parse * JSON nodes.\nfunction reportFor(name, prefix, parseNodeName) {\n  let data;\n  try { data = $(parseNodeName).first()?.json || {}; }\n  catch (_) { data = {}; }\n  const findings = Array.isArray(data[`${prefix}_aandachtspunten`])\n    ? data[`${prefix}_aandachtspunten`]\n    : [];\n  const signal = typeof data.signal_count === 'number' ? data.signal_count : null;\n  return {\n    name,\n    found: findings.length > 0,\n    count: findings.length,\n    signal_count: signal,\n    ran_llm: signal === null ? null : signal > 0,\n  };\n}\n\nconst vererving = reportFor('vererving', 'vererving', 'Parse Vererving JSON');\nconst lasten = reportFor('lasten', 'lasten', 'Parse Lasten JSON');\nconst burgerlijke = reportFor('burgerlijke', 'burgerlijke', 'Parse Burgerlijke JSON');\nconst partijen = reportFor('partijen', 'partijen', 'Parse Partijen JSON');\n\nconst reports = [vererving, lasten, burgerlijke, partijen];\nconst totalFindings = reports.reduce((sum, r) => sum + r.count, 0);\nconst ranLlmCount = reports.filter((r) => r.ran_llm === true).length;\n\nreturn [{\n  json: {\n    specialists: { vererving, lasten, burgerlijke, partijen },\n    summary: {\n      total_findings: totalFindings,\n      specialists_with_findings: reports.filter((r) => r.found).length,\n      llm_calls_made: ranLlmCount,\n      llm_calls_skipped: reports.length - ranLlmCount,\n    },\n  },\n}];\n"
       },
       "id": "collect-specialists-001",
       "name": "Collect Specialists",
@@ -861,7 +898,7 @@
     },
     {
       "parameters": {
-        "content": "## 📥 GEDEELDE ENTRY\nElke `mode` (akte / beide / analyse) komt hier binnen. `Split Input Files` parsed de multipart-body en classificeert de bestanden; `Docling` zet PDFs om naar markdown; `Mode Route` splitst op `mode`.",
+        "content": "## 📥 GEDEELDE ENTRY\nElke `mode` (akte / analyse) komt hier binnen. `Split Input Files` parsed de multipart-body en classificeert de bestanden; `Docling` zet PDFs om naar markdown; `Mode Route` splitst op `mode`.",
         "height": 240,
         "width": 970,
         "color": 7
@@ -877,7 +914,7 @@
     },
     {
       "parameters": {
-        "content": "## 📄 AKTE-GENERATIE — mode=akte & mode=beide\nBank- en kadaster-document extractie → JSON-merge → placeholder-mapping → deterministische checks → Python-DOCX-generator. Eindigt bij `Analyse Route`: mode=akte stopt hier, mode=beide gaat door naar specialisten.",
+        "content": "## 📄 AKTE-GENERATIE — mode=akte\nBank- en kadaster-document extractie → JSON-merge → placeholder-mapping → deterministische checks → Python-DOCX-generator. Eindigt bij `Build Response (akte only)`.",
         "height": 360,
         "width": 1880,
         "color": 5
@@ -909,8 +946,8 @@
     },
     {
       "parameters": {
-        "content": "## ⚖️ GEDEELDE JURIDISCHE SPECIALISTEN — mode=beide & mode=analyse\n\n**Parallelle fan-out**: alle 3 agents (Vererving / Lasten / Burgerlijke) krijgen tegelijkertijd de input van Deterministic Checks (beide) of Aggregate Markdowns (analyse).\n\n`Specialist Merge` wacht tot alle 3 hun output hebben geleverd; `Collect Specialists` bouwt een gestructureerde `{ specialists: {...}, summary: {...} }` payload — de \"bericht naar één node\" reporting.",
-        "height": 1080,
+        "content": "## ⚖️ JURIDISCHE SPECIALISTEN — mode=analyse\n\n**Parallelle fan-out**: alle 4 agents (Vererving / Lasten / Burgerlijke / Object&partijen) krijgen tegelijkertijd de input van Aggregate Markdowns.\n\n`Specialist Merge` wacht tot alle 4 hun output hebben geleverd; `Collect Specialists` bouwt een gestructureerde `{ specialists: {...}, summary: {...} }` payload — de \"bericht naar één node\" reporting.\n\n**Object&partijen** heeft een extra structured-extractie-node (`Build Partijen Extractie Prompt` → LLM → `Parse Partijen Extractie`) vóór de prompt: die levert klanten/onderpand-JSON voor de deterministische mismatch-checks (klantentelling, achternaam, gemeente) die áltijd worden gerapporteerd, naast de LLM-nuance.",
+        "height": 1560,
         "width": 1380,
         "color": 4
       },
@@ -925,7 +962,7 @@
     },
     {
       "parameters": {
-        "content": "## 📑 mode=analyse — ANALYSE-OUTPUT\nFlex-analyse mega-prompt + Parse merged de drie specialist-bevindingen, genereert het analyse-DOCX en bouwt de webhook-respons (geen akte).",
+        "content": "## 📑 mode=analyse — ANALYSE-OUTPUT\nFlex-analyse mega-prompt + Parse merged de vier specialist-bevindingen, genereert het analyse-DOCX en bouwt de webhook-respons (geen akte).",
         "height": 320,
         "width": 1140,
         "color": 6
@@ -937,22 +974,6 @@
       "position": [
         3780,
         -820
-      ]
-    },
-    {
-      "parameters": {
-        "content": "## 📑 mode=beide — JURIDISCHE-ANALYSE-TAIL\nBovenop de akte (zie linker baan) draait hier de juridische analyse met deterministische checks + 3 specialisten + mega-prompt. Beide DOCX-paden komen samen in de webhook-respons.",
-        "height": 360,
-        "width": 1140,
-        "color": 3
-      },
-      "id": "sticky-006",
-      "name": "Sticky: beide-tail",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [
-        3780,
-        420
       ]
     },
     {
@@ -1050,6 +1071,11 @@
           },
           {
             "node": "Build Burgerlijke Prompt",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Partijen Extractie Prompt",
             "type": "main",
             "index": 0
           }
@@ -1223,18 +1249,6 @@
     },
     "Generate DOCX": {
       "main": [
-        [
-          {
-            "node": "Analyse Route",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Analyse Route": {
-      "main": [
-        [],
         [
           {
             "node": "Build Response (akte only)",
@@ -1452,18 +1466,6 @@
         ]
       ]
     },
-    "Specialist Route": {
-      "main": [
-        [
-          {
-            "node": "Build Flex Analysis Prompt",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        []
-      ]
-    },
     "Specialist Merge": {
       "main": [
         [
@@ -1479,7 +1481,113 @@
       "main": [
         [
           {
-            "node": "Specialist Route",
+            "node": "Build Flex Analysis Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Partijen Prompt": {
+      "main": [
+        [
+          {
+            "node": "Partijen Has Signals?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Partijen Has Signals?": {
+      "main": [
+        [
+          {
+            "node": "Partijen LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Partijen JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Partijen LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Parse Partijen JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Partijen Ollama Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Partijen LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Partijen JSON": {
+      "main": [
+        [
+          {
+            "node": "Specialist Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Build Partijen Extractie Prompt": {
+      "main": [
+        [
+          {
+            "node": "Partijen Extractie LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Partijen Extractie LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Parse Partijen Extractie",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Partijen Extractie Ollama Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Partijen Extractie LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Partijen Extractie": {
+      "main": [
+        [
+          {
+            "node": "Build Partijen Prompt",
             "type": "main",
             "index": 0
           }

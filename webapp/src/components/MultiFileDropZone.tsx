@@ -126,6 +126,9 @@ export function MultiFileDropZone({
       { preview: PdfPreview; classification: Classification }
     >()
   );
+  // Bestanden waarvoor we `ensureMeta` al hebben gestart, zodat we dat per
+  // File-object maar één keer doen (zonder `metaMap` in de effect-deps).
+  const processedRef = useRef(new WeakSet<File>());
 
   const dossierName = useMemo(() => detectDossierName(files), [files]);
   const subfolderCount = useMemo(() => {
@@ -187,20 +190,28 @@ export function MultiFileDropZone({
   }, []);
 
   useEffect(() => {
+    // Start meta-extractie voor nog niet verwerkte bestanden (één keer per File).
     for (const f of files) {
-      if (!metaMap.has(f)) {
+      if (!processedRef.current.has(f)) {
+        processedRef.current.add(f);
         ensureMeta(f);
       }
     }
-    // Verwijder meta van bestanden die niet meer in files zitten
+    // Verwijder meta van bestanden die niet meer in files zitten. Geef alleen
+    // een nieuwe Map terug als er echt iets verandert, anders blijft de
+    // referentie gelijk en triggert deze effect zichzelf niet opnieuw.
     setMetaMap((prev) => {
+      let changed = false;
       const next = new Map(prev);
       for (const k of next.keys()) {
-        if (!files.includes(k)) next.delete(k);
+        if (!files.includes(k)) {
+          next.delete(k);
+          changed = true;
+        }
       }
-      return next;
+      return changed ? next : prev;
     });
-  }, [files, ensureMeta, metaMap]);
+  }, [files, ensureMeta]);
 
   function addFiles(incoming: File[]) {
     const ok = incoming.filter(isAcceptedDossierFile);
