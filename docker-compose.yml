@@ -85,8 +85,10 @@ x-docling: &service-docling
     - GRADIO_ALLOWED_PATHS=/shared
     - GRADIO_TEMP_DIR=/shared/docling-scratch
     - DOCLING_SERVE_ENABLE_REMOTE_SERVICES=true
-    # Sync /v1/convert/* wacht max. dit aantal seconden op conversie (default 120 → 504 bij zware OCR)
-    - DOCLING_SERVE_MAX_SYNC_WAIT=600
+    # Sync /v1/convert/* wacht max. dit aantal seconden op conversie. Houd dit gelijk aan de
+    # timeout van de n8n-node 'Docling Convert' (120s): loopt docling langer door dan n8n wacht,
+    # dan stapelen afgebroken conversies zich op en loopt de service vast.
+    - DOCLING_SERVE_MAX_SYNC_WAIT=120
   volumes:
     - docling_data:/data
     - ./shared:/shared
@@ -132,6 +134,7 @@ services:
           n8n import:workflow --separate --input=/demo-data/workflows
           # Activeer gepubliceerde versies (aanbevolen: publish:workflow i.p.v. update:workflow).
           n8n publish:workflow --id=hypotheekakte-e2e
+          n8n publish:workflow --id=juridische-analyse-e2e
           n8n publish:workflow --id=templates-management
           n8n publish:workflow --id=aktecontrole
           touch /demo-data/.imported

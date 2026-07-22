@@ -1,0 +1,141 @@
+{
+  "name": "Kennisbank Zoeken",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "kennisbank-zoeken",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "kb00a001-0001-4f00-aaaa-kb0000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        200
+      ],
+      "webhookId": "kennisbank-zoeken-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Leest de zoekvraag uit de webhook-body, valideert 'top', en schrijft de\n// query naar een tijdelijk bestand. Zo hoeft de query niet shell-escaped te\n// worden: de Execute Command-node pipet het bestand via stdin naar het\n// Python-script (kennisbank_query.py --stdin).\nconst body = ($input.first() && $input.first().json && $input.first().json.body) || {};\nconst query = String(body.query || '').trim();\nif (!query) {\n  throw new Error('Geen zoekvraag meegegeven. Stuur een JSON-body met veld \"query\".');\n}\n\nlet top = parseInt(body.top, 10);\nif (!Number.isFinite(top) || top < 1) top = 5;\nif (top > 10) top = 10;\n\nconst fs = require('fs');\nconst execId = String($execution.id || 'single').replace(/[^0-9A-Za-z_-]/g, '_').slice(0, 32);\nconst queryFile = `/tmp/kb_query_${execId}_${Date.now()}.txt`;\nfs.writeFileSync(queryFile, query, 'utf8');\n\nreturn { json: { query, top, queryFile } };"
+      },
+      "id": "kb00a001-0002-4f00-aaaa-kb0000000002",
+      "name": "Prepare Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=cat '{{ $json.queryFile }}' | OLLAMA_URL=http://host.docker.internal:11434 QDRANT_URL=http://qdrant:6333 python3 /data/shared/kennisbank/kennisbank_query.py --stdin --json --top {{ $json.top }}"
+      },
+      "id": "kb00a001-0003-4f00-aaaa-kb0000000003",
+      "name": "Run KB Query",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        200,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parseert de JSON die kennisbank_query.py op stdout zet en bouwt de\n// webhook-respons. Ruimt het tijdelijke query-bestand op.\nconst stdout = String($json.stdout || '');\nconst stderr = String($json.stderr || '');\n\ntry {\n  const f = $('Prepare Query').first() && $('Prepare Query').first().json.queryFile;\n  if (f) require('fs').unlinkSync(f);\n} catch (_) { /* best-effort opruimen */ }\n\nlet parsed = null;\ntry {\n  parsed = JSON.parse(stdout.trim());\n} catch (_) {\n  const m = stdout.match(/\\{[\\s\\S]*\\}/);\n  if (m) { try { parsed = JSON.parse(m[0]); } catch (_) {} }\n}\n\nif (!parsed || typeof parsed !== 'object') {\n  throw new Error(\n    `Kennisbank gaf geen geldige JSON terug. stdout=${stdout.slice(0, 300)} | stderr=${stderr.slice(0, 300)}`\n  );\n}\n\nconst bronnen = Array.isArray(parsed.bronnen) ? parsed.bronnen : [];\nreturn [{\n  json: {\n    success: true,\n    query: String(parsed.query || ''),\n    count: bronnen.length,\n    bronnen: bronnen.map((b) => ({\n      score: typeof b.score === 'number' ? b.score : 0,\n      titel: String(b.titel || ''),\n      bron: String(b.bron || ''),\n      artikel: String(b.artikel || ''),\n      url: String(b.url || ''),\n      tekst: String(b.tekst || ''),\n    })),\n  },\n}];"
+      },
+      "id": "kb00a001-0004-4f00-aaaa-kb0000000004",
+      "name": "Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "kb00a001-0005-4f00-aaaa-kb0000000005",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        600,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🔎 KENNISBANK ZOEKEN\nWebhook `/kennisbank-zoeken` ontvangt `{ query, top }` als JSON.\n\n`Prepare Query` schrijft de vraag naar een temp-bestand; `Run KB Query` pipet die via stdin naar `kennisbank_query.py` (embed via Ollama → semantische zoekopdracht in Qdrant-collectie `juridische_bronnen`). `Build Response` geeft de bronnen als JSON terug.",
+        "height": 260,
+        "width": 420
+      },
+      "id": "kb00a001-0006-4f00-aaaa-kb0000000006",
+      "name": "Sticky: kennisbank",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        60
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Query": {
+      "main": [
+        [
+          {
+            "node": "Run KB Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run KB Query": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "kennisbank",
+  "meta": {}
+}

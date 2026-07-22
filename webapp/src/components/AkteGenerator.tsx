@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ArrowLeft,
   ArrowRight,
   Download,
-  FileText,
   Files,
   Scale,
   Sparkles,
@@ -23,11 +23,16 @@ import { JuridischeAnalyse } from "@/components/JuridischeAnalyse";
 import type { JuridischeAnalyseData } from "@/components/JuridischeAnalyse";
 import { cn } from "@/lib/utils";
 import { dedupeFilesForUpload } from "@/lib/dedupe-upload-files";
+import { selectFiles } from "@/lib/file-groups";
 import { usePersistedFiles } from "@/hooks/use-persisted-files";
 
-const DEFAULT_WEBHOOK = "http://localhost:5678/webhook/hypotheekakte";
-
 export type GenerationMode = "akte" | "analyse";
+
+/** Akte en analyse zijn losse n8n-workflows met elk een eigen webhook. */
+const DEFAULT_WEBHOOKS: Record<GenerationMode, string> = {
+  akte: "http://localhost:5678/webhook/hypotheekakte",
+  analyse: "http://localhost:5678/webhook/juridische-analyse",
+};
 
 const MODE_META: Record<
   GenerationMode,
@@ -86,14 +91,42 @@ interface GenerationResult {
   analyse?: JuridischeAnalyseData;
 }
 
-export function AkteGenerator() {
-  const [mode, setMode] = useState<GenerationMode>("akte");
+interface AkteGeneratorProps {
+  /** Vaste modus, gekozen op de hub. */
+  mode: GenerationMode;
+  /** Terug naar de card-keuze. */
+  onBack: () => void;
+}
 
+export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
   /** Alle PDF's van het dossier voor akte / akte+analyse (map-upload).
    * Sessie-scoped bewaard, zodat een refresh de upload niet wist. */
   const [akteDossierFiles, setAkteDossierFiles] = usePersistedFiles("akte");
   const [analyseFiles, setAnalyseFiles] = usePersistedFiles("analyse");
-  const [webhookUrl, setWebhookUrl] = useState(DEFAULT_WEBHOOK);
+  /** Uitgevinkte submappen per modus: die bestanden blijven in de lijst
+   * staan maar gaan niet mee naar n8n/Docling. */
+  const [akteExcluded, setAkteExcluded] = useState<Set<string>>(new Set());
+  const [analyseExcluded, setAnalyseExcluded] = useState<Set<string>>(
+    new Set()
+  );
+  const [webhookUrls, setWebhookUrls] = useState(DEFAULT_WEBHOOKS);
+
+  // Een lege lijst betekent een verse upload: dan mogen eerdere
+  // uitvink-keuzes niet blijven plakken aan een volgend dossier.
+  const handleAkteFilesChange = useCallback(
+    (next: File[]) => {
+      setAkteDossierFiles(next);
+      if (next.length === 0) setAkteExcluded(new Set());
+    },
+    [setAkteDossierFiles]
+  );
+  const handleAnalyseFilesChange = useCallback(
+    (next: File[]) => {
+      setAnalyseFiles(next);
+      if (next.length === 0) setAnalyseExcluded(new Set());
+    },
+    [setAnalyseFiles]
+  );
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
@@ -127,11 +160,18 @@ export function AkteGenerator() {
 
   const isAnalyseOnly = mode === "analyse";
   const requiresAkteInputs = mode === "akte";
-  const hasAkteDossier = akteDossierFiles.length > 0;
-  const hasAnalyseFiles = analyseFiles.length > 0;
 
-  const inputsReady = isAnalyseOnly ? hasAnalyseFiles : hasAkteDossier;
-  const filesCount = isAnalyseOnly ? analyseFiles.length : akteDossierFiles.length;
+  const activeFiles = isAnalyseOnly ? analyseFiles : akteDossierFiles;
+  const activeExcluded = isAnalyseOnly ? analyseExcluded : akteExcluded;
+  /** Alleen deze bestanden gaan mee in de upload (uitgevinkte submappen eruit). */
+  const selectedFiles = useMemo(
+    () => selectFiles(activeFiles, activeExcluded),
+    [activeFiles, activeExcluded]
+  );
+
+  const inputsReady = selectedFiles.length > 0;
+  const filesCount = selectedFiles.length;
+  const totalCount = activeFiles.length;
 
   const modeMeta = MODE_META[mode];
 
@@ -167,26 +207,17 @@ export function AkteGenerator() {
   }
 
   function resetForm() {
-    setAkteDossierFiles([]);
-    setAnalyseFiles([]);
+    handleAkteFilesChange([]);
+    handleAnalyseFilesChange([]);
     setLogs([]);
     setShowStatus(false);
     setResult(null);
-    setCurrentStep(1);
-  }
-
-  function handleModeChange(nextMode: GenerationMode) {
-    if (nextMode === mode) return;
-    setMode(nextMode);
-    setResult(null);
-    setShowStatus(false);
-    setLogs([]);
     setCurrentStep(1);
   }
 
   async function startGeneration() {
     if (!inputsReady) return;
-    const trimmedUrl = webhookUrl.trim();
+    const trimmedUrl = webhookUrls[mode].trim();
     if (!trimmedUrl) {
       alert("Vul de webhook URL in.");
       return;
@@ -202,7 +233,7 @@ export function AkteGenerator() {
 
     addLog("Bestanden voorbereiden…");
 
-    const sourceFiles = isAnalyseOnly ? analyseFiles : akteDossierFiles;
+    const sourceFiles = selectedFiles;
     const uploadFiles = dedupeFilesForUpload(sourceFiles);
     if (uploadFiles.length === 0) {
       addLog("Geen bruikbare bestanden na filteren.", "error");
@@ -220,7 +251,6 @@ export function AkteGenerator() {
     }
 
     const formData = new FormData();
-    formData.append("mode", mode);
 
     if (isAnalyseOnly) {
       uploadFiles.forEach((file, idx) => {
@@ -355,8 +385,18 @@ export function AkteGenerator() {
 
   return (
     <div className="mx-auto w-full max-w-[1400px] px-4 pb-16 pt-8 sm:px-8 sm:pt-12">
+      {/* Terug naar de card-keuze */}
+      <button
+        type="button"
+        onClick={onBack}
+        className="mb-6 inline-flex items-center gap-1.5 text-[12.5px] font-medium text-ink-soft transition-colors hover:text-ink-strong"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2} />
+        Andere documentsoort
+      </button>
+
       {/* Hero */}
-      <section className="mb-12 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
+      <section className="mb-10 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
         <div className="animate-fade-up">
           <div className="mb-5 flex items-center gap-3">
             <span className="inline-flex items-center gap-1.5 rounded-sm border border-line-strong bg-surface/80 px-2 py-1 text-[10.5px] font-medium uppercase tracking-[0.14em] text-ink-soft">
@@ -385,39 +425,12 @@ export function AkteGenerator() {
         </div>
       </section>
 
-      {/* Mode selector */}
-      <div className="mb-8 animate-fade-up">
-        <div className="mb-4 flex items-center gap-3">
-          <span className="font-mono text-[11px] font-medium text-ink-mute">01</span>
-          <span className="h-px flex-1 bg-line/60" />
-          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft">
-            Modus
-          </span>
-        </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <ModeCard
-            active={mode === "akte"}
-            icon={<FileText className="h-4 w-4" strokeWidth={1.75} />}
-            label={MODE_META.akte.shortLabel}
-            sublabel="Concept-akte uit dossier"
-            onClick={() => handleModeChange("akte")}
-          />
-          <ModeCard
-            active={mode === "analyse"}
-            icon={<Scale className="h-4 w-4" strokeWidth={1.75} />}
-            label={MODE_META.analyse.shortLabel}
-            sublabel="Juridische eerste lezing"
-            onClick={() => handleModeChange("analyse")}
-          />
-        </div>
-      </div>
-
       {/* Werkruimte */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-6">
           {/* Voortgang */}
           <Panel
-            kicker="02"
+            kicker="01"
             label="Voortgang"
             right={
               <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-soft">
@@ -433,12 +446,12 @@ export function AkteGenerator() {
 
           {/* Bron-documenten */}
           <Panel
-            kicker="03"
+            kicker="02"
             label="Bron-documenten"
             description={
               isAnalyseOnly
-                ? "Sleep de hele dossiermap hier (inclusief submappen) of voeg losse PDF/.docx bestanden toe."
-                : "Sleep de hele dossiermap hier (inclusief submappen). Passeeropdracht en kadaster worden automatisch herkend; overige stukken gaan mee naar de analyse."
+                ? "Voeg losse stukken toe (bijv. alleen een BRP-inzage) of sleep een map hierheen. Bij een map vink je per submap aan wat meegaat."
+                : "Sleep de dossiermap hierheen of voeg losse bestanden toe. Per submap vink je aan wat meegaat — hoe minder mee hoeft, hoe sneller de verwerking. Passeeropdracht en kadaster worden automatisch herkend."
             }
             right={
               <div className="flex items-center gap-1.5 font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-ink-soft">
@@ -448,19 +461,29 @@ export function AkteGenerator() {
                     inputsReady ? "bg-success" : "bg-seal"
                   )}
                 />
-                {inputsReady ? `${filesCount} compleet` : "Wachten op upload"}
+                {inputsReady
+                  ? filesCount === totalCount
+                    ? `${filesCount} compleet`
+                    : `${filesCount} van ${totalCount} gaan mee`
+                  : totalCount > 0
+                    ? "Niets aangevinkt"
+                    : "Wachten op upload"}
               </div>
             }
           >
             {requiresAkteInputs ? (
               <MultiFileDropZone
                 files={akteDossierFiles}
-                onChange={setAkteDossierFiles}
+                onChange={handleAkteFilesChange}
+                excludedGroups={akteExcluded}
+                onExcludedGroupsChange={setAkteExcluded}
               />
             ) : (
               <MultiFileDropZone
                 files={analyseFiles}
-                onChange={setAnalyseFiles}
+                onChange={handleAnalyseFilesChange}
+                excludedGroups={analyseExcluded}
+                onExcludedGroupsChange={setAnalyseExcluded}
                 variant="documenten"
               />
             )}
@@ -470,7 +493,7 @@ export function AkteGenerator() {
           <div className="relative overflow-hidden rounded-lg cta-panel shadow-card">
             <div className="relative p-6 sm:p-7">
               <div className="mb-3 flex items-center gap-3">
-                <span className="font-mono text-[11px] font-medium text-ink-mute">04</span>
+                <span className="font-mono text-[11px] font-medium text-ink-mute">03</span>
                 <span className="h-px w-10 bg-line" />
                 <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft">
                   Genereren
@@ -489,7 +512,11 @@ export function AkteGenerator() {
                   <div className="mt-4 flex flex-wrap items-center gap-2">
                     <SummaryChip
                       label="Bestanden"
-                      value={String(filesCount)}
+                      value={
+                        filesCount === totalCount
+                          ? String(filesCount)
+                          : `${filesCount} van ${totalCount}`
+                      }
                       accent={inputsReady}
                     />
                     <SummaryChip
@@ -504,9 +531,11 @@ export function AkteGenerator() {
 
                   {!inputsReady && (
                     <p className="mt-3 text-[13px] leading-relaxed text-ink-soft">
-                      {isAnalyseOnly
-                        ? "Voeg minimaal 1 document toe om de analyse te starten."
-                        : "Voeg minimaal 1 document toe. Tip: kies de hele map."}
+                      {totalCount > 0
+                        ? "Alle submappen zijn uitgevinkt — vink er minstens één aan om te kunnen genereren."
+                        : isAnalyseOnly
+                          ? "Voeg minimaal 1 document toe om de analyse te starten — een enkel stuk (bijv. een BRP-inzage) is genoeg."
+                          : "Voeg minimaal 1 document toe. Tip: sleep de dossiermap en vink daarna aan wat mee moet."}
                     </p>
                   )}
                 </div>
@@ -545,14 +574,16 @@ export function AkteGenerator() {
                     htmlFor="webhook-url"
                     className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-ink-soft"
                   >
-                    Webhook URL
+                    Webhook URL ({modeMeta.shortLabel.toLowerCase()}-workflow)
                   </Label>
                   <Input
                     id="webhook-url"
                     type="text"
-                    value={webhookUrl}
-                    onChange={(e) => setWebhookUrl(e.target.value)}
-                    placeholder={DEFAULT_WEBHOOK}
+                    value={webhookUrls[mode]}
+                    onChange={(e) =>
+                      setWebhookUrls((prev) => ({ ...prev, [mode]: e.target.value }))
+                    }
+                    placeholder={DEFAULT_WEBHOOKS[mode]}
                     className="h-9 border-line bg-paper/60 font-mono text-[12px] text-ink-strong placeholder:text-ink-mute"
                   />
                 </div>
@@ -653,6 +684,7 @@ export function AkteGenerator() {
           <DossierSummary
             mode={mode}
             filesCount={filesCount}
+            totalCount={totalCount}
             inputsReady={inputsReady}
           />
           <RecentAktes
@@ -705,77 +737,19 @@ function Panel({ kicker, label, description, right, children }: PanelProps) {
   );
 }
 
-interface ModeCardProps {
-  active: boolean;
-  icon: React.ReactNode;
-  label: string;
-  sublabel: string;
-  recommended?: boolean;
-  onClick: () => void;
-}
-
-function ModeCard({
-  active,
-  icon,
-  label,
-  sublabel,
-  recommended,
-  onClick,
-}: ModeCardProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "group relative flex items-center gap-3 rounded-lg border px-4 py-3 text-left transition-all",
-        active
-          ? "border-azure/60 bg-azure-pale/60 shadow-glow"
-          : "border-line bg-surface/60 hover:border-line-strong hover:bg-wash/60"
-      )}
-      aria-pressed={active}
-    >
-      {recommended && !active && (
-        <span className="absolute -top-2 left-3 inline-flex items-center gap-1 rounded-sm border border-seal/40 bg-paper px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.12em] text-seal-deep">
-          Aanbevolen
-        </span>
-      )}
-      <span
-        className={cn(
-          "flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md border transition-colors",
-          active
-            ? "border-azure/50 bg-ink-deeper text-azure-glow"
-            : "border-line bg-ink-deeper text-ink-soft group-hover:text-ink-strong"
-        )}
-      >
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span
-          className={cn(
-            "block text-[15px] font-semibold leading-tight tracking-[-0.005em]",
-            active ? "text-ink-strong" : "text-ink"
-          )}
-        >
-          {label}
-        </span>
-        <span className="mt-1 block text-[12px] text-ink-soft">
-          {sublabel}
-        </span>
-      </span>
-      {active && (
-        <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-azure shadow-[0_0_8px_hsl(var(--azure))]" />
-      )}
-    </button>
-  );
-}
-
 interface DossierSummaryProps {
   mode: GenerationMode;
   filesCount: number;
+  totalCount: number;
   inputsReady: boolean;
 }
 
-function DossierSummary({ mode, filesCount, inputsReady }: DossierSummaryProps) {
+function DossierSummary({
+  mode,
+  filesCount,
+  totalCount,
+  inputsReady,
+}: DossierSummaryProps) {
   const modeLabel = MODE_META[mode].shortLabel;
   return (
     <section className="rounded-lg border border-line bg-surface shadow-card">
@@ -801,7 +775,9 @@ function DossierSummary({ mode, filesCount, inputsReady }: DossierSummaryProps) 
           value={
             <span className="flex items-center gap-2 text-[14px] font-medium text-ink-strong">
               <Files className="h-3.5 w-3.5 text-ink-soft" strokeWidth={2} />
-              {filesCount}
+              {filesCount === totalCount
+                ? filesCount
+                : `${filesCount} van ${totalCount}`}
             </span>
           }
         />

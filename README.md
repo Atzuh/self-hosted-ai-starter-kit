@@ -123,11 +123,14 @@ python3 bank-models/rabobank/build_template.py \
 
 Workflows worden automatisch geïmporteerd bij `docker compose up`. Handmatig opnieuw importeren (na een reset):
 
-1. Verwijder in n8n de bestaande workflow "Hypotheekakte E2E"
-2. **Import from file** → `n8n/demo-data/workflows/hypotheekakte-workflow.json`
-3. Zet de **Active** toggle aan
+1. Verwijder in n8n de bestaande workflows "Hypotheekakte genereren" en "Juridische Analyse E2E" (en de oude gecombineerde "Hypotheekakte E2E", indien nog aanwezig)
+2. **Import from file** → `n8n/demo-data/workflows/hypotheekakte-workflow.json` en `n8n/demo-data/workflows/juridische-analyse-workflow.json`
+3. Zet bij beide workflows de **Active** toggle aan
 
-Webhook-URL: `http://localhost:5678/webhook/hypotheekakte`
+Webhook-URLs:
+
+- Akte genereren: `http://localhost:5678/webhook/hypotheekakte`
+- Juridische analyse: `http://localhost:5678/webhook/juridische-analyse`
 
 ## Webapp lokaal ontwikkelen
 

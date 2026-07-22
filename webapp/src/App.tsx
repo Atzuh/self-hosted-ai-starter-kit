@@ -1,15 +1,16 @@
 import { useState } from "react";
 
-import { AkteGenerator } from "@/components/AkteGenerator";
+import { Dashboard } from "@/components/Dashboard";
+import { GeneratorSection } from "@/components/GeneratorSection";
 import { AkteControle } from "@/components/AkteControle";
 import { TemplatesManager } from "@/components/TemplatesManager";
 import { AppHeader } from "@/components/AppHeader";
 import { AppFooter } from "@/components/AppFooter";
 
-export type AppPage = "controle" | "generator" | "templates";
+export type AppPage = "dashboard" | "controle" | "generator" | "templates";
 
 export default function App() {
-  const [page, setPage] = useState<AppPage>("generator");
+  const [page, setPage] = useState<AppPage>("dashboard");
 
   return (
     <div className="flex min-h-screen flex-col bg-paper">
@@ -19,8 +20,9 @@ export default function App() {
       />
 
       <main className="flex-1">
+        {page === "dashboard" && <Dashboard onNavigate={setPage} />}
         {page === "controle" && <AkteControle />}
-        {page === "generator" && <AkteGenerator />}
+        {page === "generator" && <GeneratorSection />}
         {page === "templates" && <TemplatesManager />}
       </main>
 

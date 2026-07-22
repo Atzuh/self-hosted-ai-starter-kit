@@ -2,6 +2,7 @@ import {
   Bell,
   Command,
   FileText,
+  LayoutDashboard,
   LayoutTemplate,
   Search,
   ShieldCheck,
@@ -20,6 +21,7 @@ const NAV_ITEMS: Array<{
   label: string;
   icon: typeof FileText;
 }> = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "controle", label: "Controle", icon: ShieldCheck },
   { id: "generator", label: "Genereren", icon: FileText },
   { id: "templates", label: "Templates", icon: LayoutTemplate },
@@ -37,7 +39,7 @@ export function AppHeader({
           href="#"
           onClick={(e) => {
             e.preventDefault();
-            onNavigate("generator");
+            onNavigate("dashboard");
           }}
           className="group flex items-center gap-3"
         >
