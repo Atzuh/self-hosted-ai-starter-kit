@@ -56,15 +56,19 @@
           "bank.totaal_hypotheek_woorden"
         ],
         "<<ONDERPAND_STRAAT>>": [
+          "kadaster.onderpand_straat",
           "bank.onderpand_straat"
         ],
         "<<ONDERPAND_HUISNUMMER>>": [
+          "kadaster.onderpand_huisnummer",
           "bank.onderpand_huisnummer"
         ],
         "<<ONDERPAND_POSTCODE>>": [
+          "kadaster.onderpand_postcode",
           "bank.onderpand_postcode"
         ],
         "<<ONDERPAND_WOONPLAATS>>": [
+          "kadaster.onderpand_woonplaats",
           "bank.onderpand_woonplaats"
         ],
         "<<KAD_GEMEENTE>>": [
@@ -140,6 +144,17 @@
           "brp.klanten[1].geboortedatum",
           "kadaster.klanten[1].geboortedatum",
           "bank.klanten[1].geboortedatum"
+        ],
+        "<<AANHEF_1>>": [
+          "brp.klanten[0].aanhef",
+          "kadaster.klanten[0].aanhef"
+        ],
+        "<<AANHEF_2>>": [
+          "brp.klanten[1].aanhef",
+          "kadaster.klanten[1].aanhef"
+        ],
+        "<<AKTE_DATUM_RAW>>": [
+          "bank.akte_uiterlijke_datum"
         ]
       },
       "conditional_blocks": {
@@ -197,15 +212,19 @@
           "bank.overbrugging_type_hypotheek"
         ],
         "<<ONDERPAND_STRAAT>>": [
+          "kadaster.onderpand_straat",
           "bank.onderpand_straat"
         ],
         "<<ONDERPAND_HUISNUMMER>>": [
+          "kadaster.onderpand_huisnummer",
           "bank.onderpand_huisnummer"
         ],
         "<<ONDERPAND_POSTCODE>>": [
+          "kadaster.onderpand_postcode",
           "bank.onderpand_postcode"
         ],
         "<<ONDERPAND_WOONPLAATS>>": [
+          "kadaster.onderpand_woonplaats",
           "bank.onderpand_woonplaats"
         ],
         "<<KAD_GEMEENTE>>": [
@@ -276,6 +295,23 @@
         ],
         "<<GEBOORTEPLAATS_2>>": [
           "kadaster.klanten[1].geboorteplaats"
+        ],
+        "<<AANHEF_1>>": [
+          "kadaster.klanten[0].aanhef"
+        ],
+        "<<AANHEF_2>>": [
+          "kadaster.klanten[1].aanhef"
+        ],
+        "<<AKTE_DATUM_RAW>>": [
+          "bank.akte_uiterlijke_datum"
+        ],
+        "<<GEBOORTEDATUM_1_RAW>>": [
+          "kadaster.klanten[0].geboortedatum",
+          "bank.klanten[0].geboortedatum"
+        ],
+        "<<GEBOORTEDATUM_2_RAW>>": [
+          "kadaster.klanten[1].geboortedatum",
+          "bank.klanten[1].geboortedatum"
         ]
       },
       "conditional_blocks": {

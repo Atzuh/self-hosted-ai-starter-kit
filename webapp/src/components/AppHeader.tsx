@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   LayoutTemplate,
   Search,
+  Settings,
   ShieldCheck,
 } from "lucide-react";
 
@@ -25,6 +26,7 @@ const NAV_ITEMS: Array<{
   { id: "controle", label: "Controle", icon: ShieldCheck },
   { id: "generator", label: "Genereren", icon: FileText },
   { id: "templates", label: "Templates", icon: LayoutTemplate },
+  { id: "instellingen", label: "Instellingen", icon: Settings },
 ];
 
 export function AppHeader({

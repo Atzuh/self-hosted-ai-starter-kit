@@ -20,12 +20,14 @@ Backwards-compatible legacy form (positional, defaults to Rabobank template):
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import sys
 from pathlib import Path
 
 from docx import Document
+from docx.enum.text import WD_COLOR_INDEX
 from docx.oxml.ns import qn
 
 OUTPUT_DIR = Path("/data/shared/output")
@@ -35,6 +37,16 @@ BEGIN_MARKER_RE = re.compile(r"<<#BEGIN:([\w-]+)>>")
 END_MARKER_RE = re.compile(r"<<#END:([\w-]+)>>")
 FLAG_KEY_RE = re.compile(r"^<<#FLAG:([\w-]+)>>$")
 TRUTHY = {"true", "1", "yes", "ja", "y", "t"}
+
+# Placeholders waarvan de ingevulde waarde geel gearceerd wordt: velden die de
+# behandelaar nog moet controleren of invullen (bv. de passeerdatum wijkt af van
+# de uiterlijke offertedatum; de gevolmachtigde van de bank wisselt per akte).
+HIGHLIGHT_TAGS = ("<<AKTE_DATUM>>", "<<BANK_VOLMACHTHOUDER>>")
+
+# Literele invul-markers die overal in de definitieve tekst geel gearceerd
+# worden: het huwelijksregime-blanco en het ondertekentijdstip-blanco (rij van
+# 4+ punten). Deze zitten niet in een eigen placeholder maar midden in een zin.
+HIGHLIGHT_LITERAL_RE = re.compile(r"(\[zonder/onder\]|\.{4,})")
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +228,35 @@ def normaliseer_geboortedata(raw_map: dict[str, str]) -> dict[str, str]:
     return raw_map
 
 
+def _akte_jaar_woorden(j: int) -> str:
+    """Jaartal in de aktedatum: notarieel mét spatie na 'tweeduizend'
+    (2022 -> 'tweeduizend tweeentwintig'), anders dan het geboortejaar dat
+    aaneengeschreven is. Bevestigd tegen de echte Rabobank-aktes."""
+    if 2000 <= j <= 2099:
+        rest = j - 2000
+        return "tweeduizend" + (" " + _onder_honderd(rest) if rest else "")
+    return jaar_naar_woorden(j)
+
+
+def normaliseer_aktedatum(raw_map: dict[str, str]) -> dict[str, str]:
+    """Zet de rauwe uiterlijke passeerdatum (<<AKTE_DATUM_RAW>>) om naar de
+    voluit geschreven aktedatum (<<AKTE_DATUM>>), bijv. '07-04-2022' ->
+    'zeven april tweeduizend tweeentwintig'. De helper zelf hoort niet in het
+    template en wordt verwijderd. Ontbreekt/onparseerbaar de datum, dan blijft
+    <<AKTE_DATUM>> leeg (handmatig in te vullen)."""
+    raw = raw_map.get("<<AKTE_DATUM_RAW>>")
+    if raw:
+        parsed = datum_naar_woorden(raw)
+        jaar_match = re.search(r"\b(\d{4})\b", str(raw))
+        if parsed and jaar_match:
+            dag_w, maand_w, _ = parsed
+            raw_map["<<AKTE_DATUM>>"] = (
+                f"{dag_w} {maand_w} {_akte_jaar_woorden(int(jaar_match.group(1)))}"
+            )
+    raw_map.pop("<<AKTE_DATUM_RAW>>", None)
+    return raw_map
+
+
 def replace_text_in_runs(paragraph, replacements: dict[str, str]) -> int:
     """Replace placeholders in a paragraph while preserving run formatting."""
     if not paragraph.runs:
@@ -245,6 +286,93 @@ def replace_in_table(table, replacements: dict[str, str]) -> int:
             for nested_table in cell.tables:
                 count += replace_in_table(nested_table, replacements)
     return count
+
+
+def _all_paragraphs(doc: Document):
+    """Alle paragrafen: body, tabellen (recursief), headers en footers."""
+    def walk_tables(tables):
+        for t in tables:
+            for row in t.rows:
+                for cell in row.cells:
+                    yield from cell.paragraphs
+                    yield from walk_tables(cell.tables)
+    yield from doc.paragraphs
+    yield from walk_tables(doc.tables)
+    for section in doc.sections:
+        yield from section.header.paragraphs
+        yield from section.footer.paragraphs
+
+
+def apply_highlights(doc: Document, replacements: dict[str, str],
+                     tags: tuple[str, ...] = HIGHLIGHT_TAGS) -> int:
+    """Vervang de opgegeven placeholders door hun waarde in een GEEL GEARCEERDE
+    run, terwijl de overige placeholders in dezelfde paragraaf gewoon worden
+    ingevuld. Draait vóór process_document; die laat deze paragrafen daarna met
+    rust (geen placeholders meer → geen run-collapse die de arcering wist).
+
+    Werkt met runs op basis van de opmaak (rPr) van de eerste run, zodat het
+    lettertype (Arial 12pt) behouden blijft."""
+    if not tags:
+        return 0
+    split_re = re.compile("(" + "|".join(re.escape(t) for t in tags) + ")")
+    tagset = set(tags)
+    handled = 0
+    for p in _all_paragraphs(doc):
+        if not p.runs:
+            continue
+        full = "".join(r.text for r in p.runs)
+        if not any(t in full for t in tags):
+            continue
+        # Overige (niet-gearceerde) placeholders alvast in de tekst invullen.
+        text = full
+        for k, v in replacements.items():
+            if k not in tagset and k in text:
+                text = text.replace(k, str(v))
+        base_rpr = p.runs[0]._element.find(qn("w:rPr"))
+        # Bestaande runs verwijderen, paragraaf opnieuw opbouwen.
+        for r in list(p.runs):
+            r._element.getparent().remove(r._element)
+        for part in split_re.split(text):
+            if part == "":
+                continue
+            is_tag = part in tagset
+            value = str(replacements.get(part, "")) if is_tag else part
+            if value == "":
+                continue
+            run = p.add_run(value)
+            if base_rpr is not None:
+                run._element.insert(0, copy.deepcopy(base_rpr))
+            if is_tag:
+                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+        handled += 1
+    return handled
+
+
+def apply_literal_highlights(doc: Document) -> int:
+    """Arceer literele invul-markers (huwelijksregime '[zonder/onder]' en het
+    tijdstip-blanco '......') geel, waar ze ook in de definitieve tekst staan.
+    Draait NA process_document. Raakt geen paragrafen die apply_highlights al
+    afhandelde: die bevatten deze markers niet."""
+    handled = 0
+    for p in _all_paragraphs(doc):
+        if not p.runs:
+            continue
+        full = "".join(r.text for r in p.runs)
+        if not HIGHLIGHT_LITERAL_RE.search(full):
+            continue
+        base_rpr = p.runs[0]._element.find(qn("w:rPr"))
+        for r in list(p.runs):
+            r._element.getparent().remove(r._element)
+        for part in HIGHLIGHT_LITERAL_RE.split(full):
+            if part == "":
+                continue
+            run = p.add_run(part)
+            if base_rpr is not None:
+                run._element.insert(0, copy.deepcopy(base_rpr))
+            if HIGHLIGHT_LITERAL_RE.fullmatch(part):
+                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+        handled += 1
+    return handled
 
 
 def process_document(doc: Document, replacements: dict[str, str]) -> int:
@@ -294,6 +422,44 @@ def _remove_paragraph(paragraph_element) -> None:
     parent = paragraph_element.getparent()
     if parent is not None:
         parent.remove(paragraph_element)
+
+
+def process_slot(doc: Document, slot_lines: list[str]) -> int:
+    """Vervang de <<SLOT_TEKST>>-markerparagraaf door één paragraaf per regel.
+
+    De slottekst is kantoor-specifiek (kantoor.json) en kan uit meerdere
+    verklaringen bestaan. Elke regel krijgt de opmaak van de markerparagraaf
+    (Normal-stijl, Arial 12pt). Ontbreekt de marker of zijn er geen regels, dan
+    gebeurt er niets. Werkt ook in tabellen/headers/footers."""
+    lines = [ln for ln in (slot_lines or []) if str(ln).strip()]
+    marker = "<<SLOT_TEKST>>"
+    roots = [doc.element.body]
+    for section in doc.sections:
+        roots.append(section.header._element)
+        roots.append(section.footer._element)
+
+    handled = 0
+    for root in roots:
+        for p in list(root.iter(qn("w:p"))):
+            if marker not in _paragraph_text(p):
+                continue
+            parent = p.getparent()
+            if parent is None:
+                continue
+            idx = list(parent).index(p)
+            for offset, line in enumerate(lines):
+                new_p = copy.deepcopy(p)
+                t_elements = list(new_p.iter(qn("w:t")))
+                if t_elements:
+                    t_elements[0].text = line
+                    # forceer spatiebehoud voor nette regels
+                    t_elements[0].set(qn("xml:space"), "preserve")
+                    for t in t_elements[1:]:
+                        t.text = ""
+                parent.insert(idx + offset, new_p)
+            _remove_paragraph(p)
+            handled += 1
+    return handled
 
 
 def split_replacements(replacements: dict[str, str]) -> tuple[dict[str, str], dict[str, bool]]:
@@ -488,6 +654,10 @@ def main() -> int:
     raw_map = {str(k): str(v) for k, v in replacements_json.items()}
     raw_map = normaliseer_bedragen(raw_map)
     raw_map = normaliseer_geboortedata(raw_map)
+    raw_map = normaliseer_aktedatum(raw_map)
+    # Slottekst apart uitnemen: die wordt niet als platte string vervangen maar
+    # als losse paragrafen op de <<SLOT_TEKST>>-marker geëxpandeerd.
+    slot_lines = str(raw_map.pop("<<SLOT_TEKST>>", "")).split("\n")
     replacements, flags = split_replacements(raw_map)
 
     if not template_path.exists():
@@ -500,7 +670,10 @@ def main() -> int:
     try:
         document = Document(str(template_path))
         blocks_handled = process_conditional_blocks(document, flags)
+        process_slot(document, slot_lines)
+        apply_highlights(document, replacements)
         replaced_count = process_document(document, replacements)
+        apply_literal_highlights(document)
         document.save(str(output_path))
     except Exception as exc:  # noqa: BLE001 - surfaced to n8n
         print(f"ERROR: Kon template niet verwerken: {exc}", file=sys.stderr)

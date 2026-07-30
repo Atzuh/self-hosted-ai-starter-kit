@@ -1,0 +1,168 @@
+{
+  "name": "Kantoor Instellingen",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "kantoor",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "fb89cc74-a2c7-46f7-82fe-efa7c72b7543",
+      "name": "Webhook GET kantoor",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -260,
+        0
+      ],
+      "webhookId": "052ce6cb-fcb7-47b7-8837-c2b13fcf4cb8"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst KANTOOR_PATH = '/data/shared/kantoor.json';\nlet kantoor = {};\ntry {\n  kantoor = JSON.parse(fs.readFileSync(KANTOOR_PATH, 'utf8'));\n} catch (err) {\n  // Bestand ontbreekt of onleesbaar: lege defaults teruggeven i.p.v. falen.\n  return [{ json: { success: true, exists: false, kantoor: {\n    notaris_naam: '', notaris_standplaats: '', bank_volmachthouder: '', slot_tekst: []\n  } } }];\n}\nreturn [{ json: {\n  success: true,\n  exists: true,\n  kantoor: {\n    notaris_naam: String(kantoor.notaris_naam || ''),\n    notaris_standplaats: String(kantoor.notaris_standplaats || ''),\n    bank_volmachthouder: String(kantoor.bank_volmachthouder || ''),\n    slot_tekst: Array.isArray(kantoor.slot_tekst) ? kantoor.slot_tekst.map(String)\n      : (kantoor.slot_tekst ? [String(kantoor.slot_tekst)] : []),\n  }\n} }];"
+      },
+      "id": "b1eb4be6-9a68-4e5e-99c5-cdf35fd793d2",
+      "name": "Read Kantoor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "30b55bd1-5de4-42ab-a105-965c49e509fc",
+      "name": "Respond GET kantoor",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "kantoor-save",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "0d5a4578-0937-4b2f-955e-507040099a41",
+      "name": "Webhook POST kantoor",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -260,
+        220
+      ],
+      "webhookId": "722042d7-10f4-4e9f-bfe0-299b9dfd1e92"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst KANTOOR_PATH = '/data/shared/kantoor.json';\n\n// Body komt als multipart-form-data of json binnen; het veld 'data' bevat de\n// kantoor-config als JSON-string (zo vermijden we een CORS-preflight).\nconst body = $json.body || $json || {};\nlet incoming = {};\ntry {\n  incoming = typeof body.data === 'string' ? JSON.parse(body.data)\n    : (body.data && typeof body.data === 'object') ? body.data\n    : body;\n} catch (err) {\n  throw new Error('Kon kantoor-instellingen niet parsen: ' + err.message);\n}\n\n// Bestaande config als basis behouden (schema_version, $comment).\nlet current = {};\ntry { current = JSON.parse(fs.readFileSync(KANTOOR_PATH, 'utf8')); } catch (_) {}\n\nconst notarisNaam = String(incoming.notaris_naam || '').trim();\nconst standplaats = String(incoming.notaris_standplaats || '').trim();\nconst volmachthouder = String(incoming.bank_volmachthouder || '').trim();\nlet slot = incoming.slot_tekst;\nif (typeof slot === 'string') slot = slot.split('\\n');\nif (!Array.isArray(slot)) slot = [];\nslot = slot.map((s) => String(s)).filter((s) => s.trim() !== '');\n\nconst out = Object.assign({}, current, {\n  schema_version: current.schema_version || 1,\n  notaris_naam: notarisNaam,\n  notaris_standplaats: standplaats,\n  bank_volmachthouder: volmachthouder,\n  slot_tekst: slot,\n});\n\ntry {\n  fs.writeFileSync(KANTOOR_PATH, JSON.stringify(out, null, 2) + '\\n', 'utf8');\n} catch (err) {\n  throw new Error('Kon kantoor.json niet schrijven: ' + err.message);\n}\nreturn [{ json: { success: true, kantoor: {\n  notaris_naam: out.notaris_naam,\n  notaris_standplaats: out.notaris_standplaats,\n  bank_volmachthouder: out.bank_volmachthouder,\n  slot_tekst: out.slot_tekst,\n} } }];"
+      },
+      "id": "87468844-6375-4198-baa7-9ed2b5120b6f",
+      "name": "Save Kantoor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "10913df7-0bcf-4cf5-be6a-7c2330fa45bf",
+      "name": "Respond POST kantoor",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        180,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook GET kantoor": {
+      "main": [
+        [
+          {
+            "node": "Read Kantoor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Kantoor": {
+      "main": [
+        [
+          {
+            "node": "Respond GET kantoor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook POST kantoor": {
+      "main": [
+        [
+          {
+            "node": "Save Kantoor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Kantoor": {
+      "main": [
+        [
+          {
+            "node": "Respond POST kantoor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f7da71f7-cd22-4859-9ce8-e31afa1de67c",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "kantoor-instellingen"
+}

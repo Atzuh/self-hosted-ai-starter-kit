@@ -4,10 +4,11 @@ import { Dashboard } from "@/components/Dashboard";
 import { GeneratorSection } from "@/components/GeneratorSection";
 import { AkteControle } from "@/components/AkteControle";
 import { TemplatesManager } from "@/components/TemplatesManager";
+import { Instellingen } from "@/components/Instellingen";
 import { AppHeader } from "@/components/AppHeader";
 import { AppFooter } from "@/components/AppFooter";
 
-export type AppPage = "dashboard" | "controle" | "generator" | "templates";
+export type AppPage = "dashboard" | "controle" | "generator" | "templates" | "instellingen";
 
 export default function App() {
   const [page, setPage] = useState<AppPage>("dashboard");
@@ -24,6 +25,7 @@ export default function App() {
         {page === "controle" && <AkteControle />}
         {page === "generator" && <GeneratorSection />}
         {page === "templates" && <TemplatesManager />}
+        {page === "instellingen" && <Instellingen />}
       </main>
 
       <AppFooter

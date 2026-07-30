@@ -1,0 +1,14 @@
+{
+  "$comment": "Kantoor-specifieke standaardwaarden voor de akte-generatie, los van de template-registry. Verschillende notariskantoren vullen hier hun eigen notaris(sen), standplaats en slottekst in. Later beheerd via de webapp-instellingen. Ontbreekt een veld, dan blijft de bijbehorende placeholder in de akte leeg (handmatig in te vullen). slot_tekst is een lijst regels; elke regel wordt een eigen paragraaf op de plek van <<SLOT_TEKST>>. De passeerplaats staat vast in de tekst; het ondertekentijdstip blijft bewust leeg (met de hand in te vullen bij passeren).",
+  "schema_version": 1,
+  "notaris_naam": "mr. Stephanus Johannes Gerardus de Kort",
+  "notaris_standplaats": "Altena",
+  "bank_volmachthouder": "",
+  "slot_tekst": [
+    "Deze akte is verleden te Andel, gemeente Altena, op de datum in het hoofd van deze akte vermeld.",
+    "De verschenen personen zijn mij, notaris, bekend en de identiteit van de bij deze akte betrokken verschenen personen is door mij, notaris, aan de hand van de daartoe bestemde documenten vastgesteld.",
+    "De zakelijke inhoud van de akte is aan de verschenen personen opgegeven en toegelicht.",
+    "De verschenen personen hebben verklaard op volledige voorlezing van de akte geen prijs te stellen en dat zij en hun volmachtgever(s) tijdig voor het verlijden van de inhoud van de akte hebben kennis genomen en zijn gewezen op de gevolgen die voor partijen uit de akte voortvloeien, alsmede met de inhoud van de akte in te stemmen.",
+    "Daarna is de akte beperkt voorgelezen en onmiddellijk door de verschenen personen en mij, notaris, ondertekend, om ...... uur."
+  ]
+}
