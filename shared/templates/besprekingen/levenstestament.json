@@ -1,0 +1,190 @@
+{
+  "soort": "levenstestament",
+  "naam": "Levenstestament",
+  "bron": "Bespreekformulier levenstestament 30-10-2024.docx",
+  "herken_op": [
+    "levenstestament",
+    "levensvolmacht",
+    "volmacht bij leven"
+  ],
+  "toelichting": "Vaste volgorde voor het besprekingsverslag van een levenstestamentbespreking. Het bespreekformulier begint met voorlichting (wat gebeurt er zonder volmacht, gang naar de rechter, voordelen van een levensvolmacht); die blokken staan hier bewust niet in. Het verslag begint bij wat de cliënt beslist, dus vanaf 'Wie wordt gevolmachtigde'. 'Familiesituatie' en 'Vermogenssituatie' staan er op verzoek vooraan. Kopjes die niet aan bod kwamen blijven staan met de vermelding 'Niet besproken'.",
+  "secties": [
+    {
+      "kop": "Familiesituatie",
+      "aanwijzing": "Burgerlijke staat, huwelijk of partnerschap en het geldende regime, kinderen en stiefkinderen, wie er in beeld is als vertrouwenspersoon.",
+      "trefwoorden": [
+        "gehuwd",
+        "getrouwd",
+        "huwelijk",
+        "gemeenschap van goederen",
+        "huwelijkse voorwaarden",
+        "kinderen",
+        "dochter",
+        "zoon",
+        "partner",
+        "zus",
+        "broer"
+      ]
+    },
+    {
+      "kop": "Vermogenssituatie",
+      "aanwijzing": "Woning en andere registergoederen, hypotheek, spaargeld en beleggingen, onderneming, bestaande bancaire volmacht.",
+      "trefwoorden": [
+        "woning",
+        "huis",
+        "hypotheek",
+        "spaargeld",
+        "beleggingen",
+        "vermogen",
+        "onderneming",
+        "bancaire volmacht",
+        "bankrekening"
+      ]
+    },
+    {
+      "kop": "Wie wordt gevolmachtigde",
+      "aanwijzing": "Wie de volmacht krijgt (partner of een ander) en wanneer die in werking treedt: direct werkend, onder berusting of kennisgeving, of pas na een artsenverklaring.",
+      "trefwoorden": [
+        "gevolmachtigde",
+        "volmacht",
+        "direct werkend",
+        "artsenverklaring",
+        "berusting",
+        "kennisgeving"
+      ]
+    },
+    {
+      "kop": "Opvolgend gevolmachtigde",
+      "aanwijzing": "Wie het overneemt als de eerste gevolmachtigde het niet kan of wil, bijvoorbeeld de kinderen samen, en vanaf welk moment.",
+      "trefwoorden": [
+        "opvolgend",
+        "opvolger",
+        "reserve",
+        "samen bevoegd"
+      ]
+    },
+    {
+      "kop": "Ondervolmacht",
+      "aanwijzing": "Of de gevolmachtigde de bevoegdheid mag doorgeven, en onder welke voorwaarden.",
+      "trefwoorden": [
+        "ondervolmacht",
+        "doorgeven",
+        "doorgegeven"
+      ]
+    },
+    {
+      "kop": "Omvang van de volmacht",
+      "aanwijzing": "Algehele of beperkte volmacht, apart voor de partner en voor kinderen of overigen. Vermogensrechtelijke handelingen zoals de woning verkopen, de hypotheek wijzigen, schenken en bankzaken.",
+      "trefwoorden": [
+        "algehele volmacht",
+        "beperkte volmacht",
+        "verkopen",
+        "hypotheek wijzigen",
+        "bankzaken",
+        "omvang"
+      ]
+    },
+    {
+      "kop": "Beperkingen",
+      "aanwijzing": "Uitgesloten handelingen zoals borgtocht, zekerheidsstelling, hoofdelijk medeschuldenaarschap of zich sterk maken voor een derde.",
+      "trefwoorden": [
+        "borgtocht",
+        "zekerheidsstelling",
+        "hoofdelijk",
+        "sterk maken",
+        "uitgesloten"
+      ]
+    },
+    {
+      "kop": "Schenkingsbevoegdheid",
+      "aanwijzing": "Of er geschonken mag worden en onder welke voorwaarden: gelijk aan kinderen en kleinkinderen, uit de opbrengst van de woning, tot een vermogensgrens. Extra clausules zoals schenken in lijn met het testament of doorlopende giften aan goede doelen.",
+      "trefwoorden": [
+        "schenken",
+        "schenking",
+        "schenkingen",
+        "belastingvrij",
+        "vermogensgrens"
+      ]
+    },
+    {
+      "kop": "Toezichthouder",
+      "aanwijzing": "Of er een toezichthouder komt, wie dat is, of die de volmacht mag intrekken, welke rechtshandelingen toestemming vragen, en met welke frequentie inzage en toetsing plaatsvinden.",
+      "trefwoorden": [
+        "toezichthouder",
+        "toezicht",
+        "intrekken",
+        "inzage",
+        "toestemming"
+      ]
+    },
+    {
+      "kop": "Bancaire gevolmachtigde",
+      "aanwijzing": "Of er meteen een bancaire volmacht wordt ingebouwd, en voor wie.",
+      "trefwoorden": [
+        "bancaire",
+        "bank",
+        "bankvolmacht"
+      ]
+    },
+    {
+      "kop": "Extra clausules",
+      "aanwijzing": "Bijvoorbeeld dat de woning alleen verkocht mag worden bij langdurige opname, of dat de gevolmachtigde vooraf toestemming vraagt aan of overlegt met de toezichthouder.",
+      "trefwoorden": [
+        "clausule",
+        "clausules",
+        "voorwaarde",
+        "alleen indien"
+      ]
+    },
+    {
+      "kop": "Bijzondere vermogensbestanddelen",
+      "aanwijzing": "Inboedel, huisdieren en onderneming, inclusief tekstblokken voor een VOF of B.V.",
+      "trefwoorden": [
+        "inboedel",
+        "huisdier",
+        "huisdieren",
+        "onderneming",
+        "vof",
+        "b.v."
+      ]
+    },
+    {
+      "kop": "Niet-vermogensrechtelijke zaken",
+      "aanwijzing": "Medisch aanspreekpunt, behandelverklaringen, wel of niet reanimeren, wel of niet vocht toedienen, euthanasieverklaring.",
+      "trefwoorden": [
+        "medisch",
+        "arts",
+        "huisarts",
+        "reanimeren",
+        "vocht",
+        "euthanasie",
+        "behandelverklaring",
+        "aanspreekpunt"
+      ]
+    },
+    {
+      "kop": "Mentorschap, curatele en bewind",
+      "aanwijzing": "Wensen daarover, en of iemand juist uitgesloten moet worden.",
+      "trefwoorden": [
+        "mentorschap",
+        "curatele",
+        "bewind",
+        "rechter",
+        "uitsluiten"
+      ]
+    },
+    {
+      "kop": "Vaccinatieclausule",
+      "aanwijzing": "Of de vaccinatieclausule wordt opgenomen.",
+      "trefwoorden": [
+        "vaccinatie",
+        "vaccinatieclausule",
+        "inenting"
+      ]
+    },
+    {
+      "kop": "Overige aandachtspunten",
+      "aanwijzing": "Wat verder is besproken en niet onder een van bovenstaande kopjes valt: afschriften en uittreksels, kosten, planning, vervolgafspraken."
+    }
+  ]
+}

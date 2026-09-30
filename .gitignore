@@ -6,3 +6,19 @@ n8n/demo-data/.imported
 bank-models/**/*.docx
 bank-models/**/*.doc
 bank-models/**/*.pdf
+
+# Whisper-modellen (honderden MB) — lokaal downloaden, niet committen.
+shared/whisper/models/
+
+# Opgenomen besprekingen bevatten cliëntgegevens — nooit in git.
+shared/besprekingen/
+
+# Jobbestanden van lopende besprekingen (bevatten transcripten).
+shared/jobs/
+
+# Word-lockbestanden van geopende documenten.
+~$*
+
+# Gegenereerde documenten bevatten cliële- en dossiergegevens: nooit in git.
+# De map blijft bestaan (nginx serveert hem), alleen de inhoud is uitgesloten.
+shared/output/

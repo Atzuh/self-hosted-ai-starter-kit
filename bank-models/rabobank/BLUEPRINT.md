@@ -7,8 +7,10 @@ Scriptor-template `shared/templates/rabobank/template_HYRABO00.docx`.
 > **Status:** **READY voor end-to-end test.** `extraction_prompt`,
 > `placeholders` en `conditional_blocks` zijn afgestemd op het ECH-formaat
 > (Rabobank passeeropdracht). Notariële velden (akte-datum, notarisnaam,
-> plaats, tijd, verkrijgingstitel) blijven leeg in de output en worden door
-> de notaris in Word ingevuld.
+> plaats, tijd) blijven leeg in de output en worden door de notaris in Word
+> ingevuld. De verkrijging wordt wél opgesteld: onderpand, verkrijgingsketen
+> en voorbelasting komen deterministisch uit de Kadaster-uitdraaien en de
+> brondocumenten.
 
 ## Bron-bestand
 
@@ -80,7 +82,7 @@ met aanvullende conditionele blokken.
 | Renten/kosten begroot (b) | `<<OPSLAG_WOORDEN>>`, `<<OPSLAG_CIJFER>>` | passeeropdracht |
 | Totaalbedrag inschrijving | `<<TOTAAL_HYPOTHEEK_WOORDEN>>`, `<<TOTAAL_HYPOTHEEK_CIJFER>>` | passeeropdracht |
 | Onderpand-blok (kadastraal) | `<<ONDERPAND_STRAAT>>`, `<<ONDERPAND_HUISNUMMER>>`, `<<ONDERPAND_POSTCODE>>`, `<<ONDERPAND_WOONPLAATS>>`, `<<KAD_GEMEENTE>>`, `<<KAD_SECTIE>>`, `<<KAD_NUMMER>>`, `<<KAD_GROOTTE_WOORDEN>>` | passeeropdracht + kadaster |
-| Verkrijging onderpand | `<<VERKRIJGING_TITEL_1>>` | leeg — notaris vult in |
+| Verkrijging onderpand | `<<VERKRIJGING_TEKST>>` (blok) | kadaster + brondocumenten |
 | Plaats van ondertekening | `<<AKTE_PLAATS>>` | leeg — notaris vult in |
 | Tijdstip ondertekening | `<<AKTE_TIJDSTIP>>` | leeg — notaris vult in |
 
@@ -138,16 +140,19 @@ Final paragraphs: 121 (model had 290)
 
 De 7 resterende markers zijn precies die die de notaris zelf in Word
 invult: `AKTE_DATUM`, `NOTARIS_NAAM`, `NOTARIS_STANDPLAATS`,
-`BANK_VOLMACHTHOUDER`, `VERKRIJGING_TITEL_1`, `AKTE_PLAATS` en
+`BANK_VOLMACHTHOUDER`, `AKTE_PLAATS` en
 `AKTE_TIJDSTIP`. In het 1-hypotheekgever-geval blijven precies dezelfde
 7 markers over en wordt het tweede comparant-blok (inclusief de "zowel
 samen als ieder afzonderlijk"-tekst) automatisch verwijderd.
 
 ## Wat ontbreekt nog (TBD voor productie)
 
-1. **`<<VERKRIJGING_TITEL_1>>`** wordt momenteel leeg gelaten — vereist
-   parsing van de kadaster-eigendomsinformatie om de leveringstitel te
-   extraheren. Voor nu vult de notaris dit handmatig in Word in.
+1. ~~**`<<VERKRIJGING_TITEL_1>>`**~~ — opgelost. De verkrijging staat nu als
+   blok (`<<VERKRIJGING_TEKST>>`) in het template en wordt opgebouwd uit de
+   kadastrale eigendomsinformatie (inschrijving, deel/nummer, aandeel) en het
+   brondocument van die inschrijving (aard van de titel, kwijting, ontbindende
+   voorwaarden, notaris). Ontbreekt het brondocument in het dossier, dan
+   blijven de aard van de titel en de notaris een gearceerde invulmarker.
 2. **Conditionele variant-blokken** (vaste hypotheek, schip, agrarisch,
    fabriek, rangwisseling, economische eigendom, landinrichting,
    echtgenoot-toestemming) zijn nu hard verwijderd. Wanneer er een

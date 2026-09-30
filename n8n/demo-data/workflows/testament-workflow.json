@@ -1,0 +1,202 @@
+{
+  "name": "Testament Concept",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "testament",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "f1a2b3c4-0001-4f00-cccc-testament0001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -260,
+        300
+      ],
+      "webhookId": "testament-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ---------------------------------------------------------------------------\n// Start van de testament-generatie.\n//\n// Zelfde jobmodel als de andere generatoren: de webhook antwoordt direct met\n// een job_id en de workflow loopt daarachter door. Het renderen duurt hier maar\n// een seconde — er komt geen model aan te pas — maar het jobmodel houden we\n// aan zodat de webapp één manier van wachten heeft en er later een controlestap\n// tussen kan zonder dat de webapp verandert.\n//\n// Verwacht multipart-form-data met één veld 'payload' (JSON-tekst).\n// ---------------------------------------------------------------------------\n\nconst fs = require('fs');\nconst JOB_DIR = '/data/shared/jobs';\nconst BEWAARTERMIJN_MS = 24 * 60 * 60 * 1000;\n\n// Een throw in een Code node levert bij responseMode=responseNode een leeg\n// 200-antwoord op; verwachte fouten gaan daarom als data terug. De IF-node\n// hierna splitst erop.\nfunction mislukt(bericht) {\n  return [{ json: { ok: false, error: bericht } }];\n}\n\nconst body = $json.body || $json || {};\nlet payload;\ntry {\n  payload = typeof body.payload === 'string' ? JSON.parse(body.payload) : (body.payload || body);\n} catch (err) {\n  return mislukt(`Kon payload niet lezen als JSON: ${err.message}`);\n}\n\nconst personen = Array.isArray(payload.personen) ? payload.personen : [];\nconst testamenten = Array.isArray(payload.testamenten) ? payload.testamenten : [];\nif (!personen.length) return mislukt('Geen cliëntgegevens meegestuurd.');\nif (!testamenten.length) return mislukt('Geen testamenten meegestuurd.');\nif (testamenten.length > 4) return mislukt('Hoogstens vier testamenten per keer.');\n\nfor (const [i, t] of testamenten.entries()) {\n  const erflater = Number(t.erflater);\n  if (!Number.isInteger(erflater) || erflater < 0 || erflater >= personen.length) {\n    return mislukt(`Testament ${i + 1} verwijst naar een cliënt die niet bestaat.`);\n  }\n  if (!Array.isArray(t.geselecteerd) || !t.geselecteerd.length) {\n    return mislukt(`Testament ${i + 1} heeft geen enkel blok geselecteerd.`);\n  }\n}\n\nconst nu = new Date();\nconst stempel =\n  nu.getFullYear() +\n  String(nu.getMonth() + 1).padStart(2, '0') +\n  String(nu.getDate()).padStart(2, '0') + '_' +\n  String(nu.getHours()).padStart(2, '0') +\n  String(nu.getMinutes()).padStart(2, '0') +\n  String(nu.getSeconds()).padStart(2, '0');\n\nconst referentie = String(payload.referentie || payload?.metadata?.dossier || stempel)\n  .replace(/[^0-9A-Za-z_.-]/g, '_');\nconst jobId = `testament_${stempel}_${String($execution.id || 'x')}`\n  .replace(/[^0-9A-Za-z_-]/g, '_');\n\nfs.mkdirSync(JOB_DIR, { recursive: true });\n\n// Oude jobbestanden opruimen; ze bevatten cliëntgegevens.\ntry {\n  for (const naam of fs.readdirSync(JOB_DIR)) {\n    if (!naam.endsWith('.json')) continue;\n    const pad = `${JOB_DIR}/${naam}`;\n    if (Date.now() - fs.statSync(pad).mtimeMs > BEWAARTERMIJN_MS) fs.unlinkSync(pad);\n  }\n} catch (_) {\n  // Opruimen is best-effort; een nieuwe job mag er niet op stuklopen.\n}\n\nfs.writeFileSync(\n  `${JOB_DIR}/${jobId}.json`,\n  JSON.stringify({\n    job_id: jobId,\n    soort: 'testament',\n    status: 'akte opmaken',\n    fase: 1,\n    referentie,\n    aantal_testamenten: testamenten.length,\n    resultaat: null,\n    fout: null,\n    gestart_op: nu.toISOString(),\n    bijgewerkt_op: nu.toISOString(),\n  }),\n  'utf8'\n);\n\nconst execId = String($execution.id || 'single').replace(/[^0-9A-Za-z_-]/g, '_').slice(0, 32);\nconst argsFile = `/tmp/n8n_args_testament_${execId}_${Date.now()}.json`;\nfs.writeFileSync(\n  argsFile,\n  JSON.stringify({\n    referentie,\n    metadata: payload.metadata || {},\n    herkomst: payload.herkomst || {},\n    personen,\n    testamenten,\n    prijs_controle_cent: payload.prijs_controle_cent ?? null,\n    blokken_bestand: `/data/shared/templates/aktes/${String(payload.soort || 'testament').replace(/[^a-z]/g, '')}.json`,\n    kantoor_bestand: '/data/shared/kantoor.json',\n  }),\n  'utf8'\n);\n\nreturn [{ json: { ok: true, jobId, jobPad: `${JOB_DIR}/${jobId}.json`, argsFile, referentie } }];"
+      },
+      "id": "f1a2b3c4-0002-4f00-cccc-testament0002",
+      "name": "Create Testament Job",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.ok === false ? { success: false, error: $json.error } : { success: true, job_id: $json.jobId, status: 'akte opmaken' } }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "f1a2b3c4-0003-4f00-cccc-testament0003",
+      "name": "Respond Job Id",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        260,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f1a2b3c4-cond-testament-ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f1a2b3c4-0004-4f00-cccc-testament0004",
+      "name": "Payload geldig?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=python3 /data/shared/genereer_testament.py --args-file '{{ $json.argsFile }}'"
+      },
+      "id": "f1a2b3c4-0005-4f00-cccc-testament0005",
+      "name": "Generate Testament DOCX",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        520,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Leest de uitvoer van genereer_testament.py, zet het resultaat in het\n// jobbestand en levert het aan de webapp. De HTTP-respons met het job_id is al\n// veel eerder verstuurd; hier gaat niets meer over de lijn.\nconst fs = require('fs');\n\nconst start = $('Create Testament Job').first()?.json || {};\nconst cmd = $json || {};\nconst stdout = String(cmd.stdout || '');\nconst stderr = String(cmd.stderr || '');\n\nfunction werkJobBij(velden) {\n  let job = {};\n  try {\n    job = JSON.parse(fs.readFileSync(start.jobPad, 'utf8'));\n  } catch (_) {\n    // Jobbestand weg (handmatig opgeruimd?): dan schrijven we het opnieuw aan.\n  }\n  const nieuw = { ...job, ...velden, bijgewerkt_op: new Date().toISOString() };\n  try {\n    fs.writeFileSync(start.jobPad, JSON.stringify(nieuw), 'utf8');\n  } catch (_) {\n    // Niet kunnen bijwerken maakt de documenten niet ongeldig.\n  }\n  return nieuw;\n}\n\nfunction regel(naam) {\n  const m = stdout.match(new RegExp(`^${naam}:\\\\s*(.+)$`, 'm'));\n  return m ? m[1].trim() : '';\n}\n\nconst succesPad = regel('SUCCESS');\nif (!succesPad) {\n  const fout =\n    `Concept niet gegenereerd. stdout=${stdout.slice(0, 300)}; stderr=${stderr.slice(0, 300)}`;\n  werkJobBij({ status: 'fout', fase: 2, fout, resultaat: null });\n  return [{ json: { success: false, error: fout } }];\n}\n\nlet documenten = [];\nlet offerte = null;\ntry { documenten = JSON.parse(regel('DOCUMENTS') || '[]'); } catch (_) { /* leeg laten */ }\ntry { offerte = JSON.parse(regel('OFFERTE') || 'null'); } catch (_) { /* leeg laten */ }\n\nconst basis = 'http://localhost:8080/output/';\nconst metUrls = documenten.map((d) => ({\n  ...d,\n  download_url: basis + d.bestandsnaam,\n  preview_url: basis + String(d.bestandsnaam).replace(/\\.docx$/i, '.html'),\n}));\n\nconst waarschuwingen = stdout\n  .split('\\n')\n  .filter((r) => r.startsWith('WAARSCHUWING: '))\n  .map((r) => r.slice('WAARSCHUWING: '.length));\n\nconst eerste = metUrls[0] || {};\nconst resultaat = {\n  success: true,\n  mode: 'testament',\n  referentie: start.referentie || '',\n  // De vlakke velden wijzen naar het eerste concept, zodat consumenten die het\n  // patroon van de andere generatoren volgen blijven werken. `documenten` is\n  // additief en bevat alles, inclusief de offerte.\n  filename: eerste.bestandsnaam || null,\n  file_path: eerste.pad || null,\n  download_url: eerste.download_url || null,\n  preview_url: eerste.preview_url || null,\n  documenten: metUrls,\n  offerte,\n  totaal_cent: offerte ? offerte.totaal_cent : null,\n  lege_velden: Number(regel('LEGE_VELDEN') || 0),\n  waarschuwingen,\n};\n\nconst job = werkJobBij({ status: 'klaar', fase: 2, fout: null, resultaat });\nreturn [{ json: job }];"
+      },
+      "id": "f1a2b3c4-0006-4f00-cccc-testament0006",
+      "name": "Build Testament Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Testament uit tekstblokken\n\nGeen model in de lus: de blokselectie komt uit het bouwscherm, de teksten en tarieven uit `shared/templates/aktes/testament.json`, de kantoorgegevens uit `shared/kantoor.json`.\n\nBij een echtpaar komen er twee concepten uit die inhoudelijk mogen verschillen, plus één offerte. Blokken tellen in de offerte één keer, ook als ze in beide testamenten staan.",
+        "height": 260,
+        "width": 420
+      },
+      "id": "f1a2b3c4-0007-4f00-cccc-testament0007",
+      "name": "Sticky: testament",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        -20
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Create Testament Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Testament Job": {
+      "main": [
+        [
+          {
+            "node": "Payload geldig?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Payload geldig?": {
+      "main": [
+        [
+          {
+            "node": "Respond Job Id",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Testament DOCX",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Job Id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Testament DOCX": {
+      "main": [
+        [
+          {
+            "node": "Build Testament Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "foutafhandeling"
+  },
+  "versionId": "f1a2b3c4-67f5-4daa-b227-testament00099",
+  "meta": {
+    "instanceId": "self-hosted-ai-starter-kit"
+  },
+  "id": "testament-concept"
+}

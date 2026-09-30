@@ -1,0 +1,1156 @@
+{
+  "name": "Bespreking naar Verslag",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bespreking",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d1e2f3a4-0001-4f00-bbbb-be5f0e000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        200
+      ],
+      "webhookId": "bespreking-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Leest de multipart-upload van /bespreking: één audiobestand + wat losse\n// tekstvelden. De webapp levert 16 kHz mono WAV aan (client-side geconverteerd\n// via de Web Audio API), zodat er nergens in de keten ffmpeg nodig is —\n// whisper.cpp eet precies dit formaat.\n//\n// In plaats van audio mag ook een kant-en-klaar `transcript`-veld worden\n// meegestuurd. Dan wordt de Whisper-stap overgeslagen. Bedoeld om de\n// samenvatting te beproeven met een uitgeschreven script: zo zit er geen\n// transcriptieruis tussen en test je alleen wat het model ervan maakt.\nconst item = $input.first();\nconst binary = (item && item.binary) || {};\nconst body = (item && item.json && item.json.body) || item.json || {};\n\nfunction veld(naam, standaard) {\n  const v = body[naam];\n  return v === undefined || v === null || v === '' ? standaard : String(v);\n}\n\nconst audioKey = Object.keys(binary).find((k) => {\n  const mime = String(binary[k]?.mimeType || '').toLowerCase();\n  const name = String(binary[k]?.fileName || '').toLowerCase();\n  return mime.startsWith('audio/') || /\\.(wav|mp3|m4a|webm|ogg|flac)$/.test(name);\n});\n\n// Een transcript kan als tekstveld of als .txt-bijlage binnenkomen.\nlet transcriptTekst = veld('transcript', '');\nif (!transcriptTekst) {\n  const txtKey = Object.keys(binary).find((k) =>\n    /\\.txt$/i.test(String(binary[k]?.fileName || ''))\n  );\n  if (txtKey) {\n    const buffer = await this.helpers.getBinaryDataBuffer(0, txtKey);\n    transcriptTekst = buffer.toString('utf8');\n  }\n}\ntranscriptTekst = transcriptTekst.trim();\n\nif (!audioKey && !transcriptTekst) {\n  throw new Error(\n    'Webhook ontving geen audiobestand en geen transcript. Stuur een WAV/MP3/M4A mee ' +\n      'als multipart/form-data, of een veld `transcript` met uitgeschreven tekst.'\n  );\n}\n\n// Referentie bepaalt de bestandsnaam. Dossiernummer als de gebruiker het invult,\n// anders een tijdstempel — nooit de (mogelijk persoonsgebonden) titel.\nconst nu = new Date();\nconst stempel =\n  nu.getFullYear() +\n  String(nu.getMonth() + 1).padStart(2, '0') +\n  String(nu.getDate()).padStart(2, '0') +\n  '_' +\n  String(nu.getHours()).padStart(2, '0') +\n  String(nu.getMinutes()).padStart(2, '0') +\n  String(nu.getSeconds()).padStart(2, '0');\n\nconst dossier = veld('dossier', '');\nconst referentie = (dossier || stempel).replace(/[^0-9A-Za-z_.-]/g, '_');\n\n// Jobbestand aanmaken. De webhook antwoordt hierna meteen met dit job_id en de\n// workflow loopt daarachter door; de webapp pollt de status. Zo hoeft er geen\n// HTTP-verbinding een uur open te blijven voor een lange bespreking.\nconst fs = require('fs');\nconst JOB_DIR = '/data/shared/jobs';\nconst jobId = `${stempel}_${String($execution.id || Math.random().toString(36).slice(2))}`\n  .replace(/[^0-9A-Za-z_-]/g, '_');\n\n// Soort bespreking bepalen: expliciet meegegeven, anders afgeleid uit het\n// onderwerp aan de hand van `herken_op` in de sjablonen. Let op de volgorde van\n// herkennen: \"testament\" zit ook in \"levenstestament\", dus het lángste passende\n// trefwoord wint — anders belandt een levenstestament onder het testamentsjabloon.\nconst SJABLOON_DIR = '/data/shared/templates/besprekingen';\nlet soort = veld('soort', '').trim().toLowerCase();\n\nif (!soort || soort === 'auto') {\n  const zoektekst = `${veld('onderwerp', '')} ${veld('dossier', '')}`.toLowerCase();\n  let beste = { soort: '', lengte: 0 };\n  try {\n    for (const naam of fs.readdirSync(SJABLOON_DIR)) {\n      if (!naam.endsWith('.json')) continue;\n      const sj = JSON.parse(fs.readFileSync(`${SJABLOON_DIR}/${naam}`, 'utf8'));\n      for (const woord of sj.herken_op || []) {\n        const w = String(woord).toLowerCase();\n        if (zoektekst.includes(w) && w.length > beste.lengte) {\n          beste = { soort: sj.soort, lengte: w.length };\n        }\n      }\n    }\n  } catch (_) {\n    // Geen sjabloonmap of onleesbaar bestand: dan gewoon een vrij verslag.\n  }\n  soort = beste.soort || 'algemeen';\n}\n\nfs.mkdirSync(JOB_DIR, { recursive: true });\n\n// Oude jobbestanden opruimen. Ze bevatten het volledige transcript van een\n// cliëntbespreking, dus ze horen niet langer te blijven staan dan nodig is om\n// het resultaat op te halen. Een dag is ruim; het verslag zelf staat als .docx\n// in shared/output.\nconst BEWAARTERMIJN_MS = 24 * 60 * 60 * 1000;\ntry {\n  for (const naam of fs.readdirSync(JOB_DIR)) {\n    if (!naam.endsWith('.json')) continue;\n    const pad = `${JOB_DIR}/${naam}`;\n    if (Date.now() - fs.statSync(pad).mtimeMs > BEWAARTERMIJN_MS) fs.unlinkSync(pad);\n  }\n} catch (_) {\n  // Opruimen is best-effort; een nieuwe bespreking mag er niet op stuklopen.\n}\n\nfs.writeFileSync(\n  `${JOB_DIR}/${jobId}.json`,\n  JSON.stringify({\n    job_id: jobId,\n    soort,\n    // Met een meegestuurd transcript begint de job meteen bij het samenvatten.\n    status: audioKey ? 'transcriberen' : 'samenvatten',\n    fase: audioKey ? 1 : 2,\n    referentie,\n    dossier,\n    datum: veld('datum', nu.toLocaleDateString('nl-NL')),\n    duur_seconden: Number(veld('duur_seconden', '0')) || 0,\n    blok_aantal: null,\n    resultaat: null,\n    fout: null,\n    gestart_op: nu.toISOString(),\n    bijgewerkt_op: nu.toISOString(),\n  }),\n  'utf8'\n);\n\n// Initial prompt voor Whisper: alleen het onderwerp en de deelnemers.\n//\n// Bewust géén lijst met vaktermen meer. Gemeten op een echte bespreking van 55\n// minuten kostte zo'n lijst van 29 termen 900 woorden inhoud (5.620 tegen 6.545)\n// en verdubbelde hij de hallucinatielussen; met large-v3 stortte de transcriptie\n// zelfs volledig in (795 woorden). Winst was alleen een betere spelling van\n// \"langslevende\" — te weinig voor die prijs. Een korte prompt met namen houdt\n// het naam-voordeel zonder die schade.\n//\n// Kort houden: Whisper kapt de initial prompt af rond de 224 tokens, en een\n// lange, lijstachtige prompt zonder natuurlijke zinsbouw lokt herhaling uit.\nconst whisperDelen = ['Notariële bespreking.'];\nif (veld('onderwerp', '')) whisperDelen.push(`Onderwerp: ${veld('onderwerp', '')}.`);\nif (veld('deelnemers', '')) whisperDelen.push(`Aanwezig: ${veld('deelnemers', '')}.`);\n\nreturn [{\n  json: {\n    jobId,\n    soort,\n    whisperPrompt: whisperDelen.join(' '),\n    audioField: audioKey || '',\n    heeftAudio: !!audioKey,\n    transcriptTekst,\n    filename: binary[audioKey]?.fileName || (transcriptTekst ? 'transcript.txt' : 'opname.wav'),\n    dossier,\n    onderwerp: veld('onderwerp', ''),\n    deelnemers_invoer: veld('deelnemers', ''),\n    // Vrije context van de behandelaar: wat je niet uit de opname kunt horen\n    // maar wel het gesprek duidt (\"mevrouw stottert\", \"de heer voerde vrijwel\n    // het hele gesprek\"). Gaat bewust NIET naar Whisper: een langere initial\n    // prompt kostte gemeten inhoud. Wel naar de samenvatstappen als achtergrond,\n    // en letterlijk in het verslag — het is een waarneming van de behandelaar en\n    // hoort onveranderd in het dossier.\n    context: veld('context', '').trim(),\n    datum: veld('datum', nu.toLocaleDateString('nl-NL')),\n    duur_seconden: Number(veld('duur_seconden', '0')) || 0,\n    referentie,\n    ontvangenOp: nu.toISOString(),\n  },\n  binary: item.binary,\n}];"
+      },
+      "id": "d1e2f3a4-0002-4f00-bbbb-be5f0e000002",
+      "name": "Prepare Audio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"success\": true, \"job_id\": $json.jobId, \"status\": \"transcriberen\" } }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "d1e2f3a4-0022-4f00-bbbb-be5f0e000022",
+      "name": "Respond Job Id",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        200,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8910/inference",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "={{ $json.audioField }}"
+            },
+            {
+              "name": "prompt",
+              "value": "={{ $json.whisperPrompt }}"
+            },
+            {
+              "name": "language",
+              "value": "nl"
+            },
+            {
+              "name": "response_format",
+              "value": "json"
+            },
+            {
+              "name": "temperature",
+              "value": "0.0"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 1200000,
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "d1e2f3a4-0003-4f00-bbbb-be5f0e000003",
+      "name": "Whisper Transcribe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        400,
+        60
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d1e2f3a4-cond-heeft-audio",
+              "leftValue": "={{ $json.heeftAudio }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d1e2f3a4-0025-4f00-bbbb-be5f0e000025",
+      "name": "Audio of transcript?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        200,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Er is een uitgeschreven transcript meegestuurd in plaats van audio; de\n// Whisper-stap wordt dan overgeslagen. We leveren hier dezelfde vorm aan als\n// whisper-server ({ text }), zodat Extract Transcript geen weet hoeft te hebben\n// van welke van de twee routes het is.\nreturn [{ json: { text: String($json.transcriptTekst || '') } }];"
+      },
+      "id": "d1e2f3a4-0026-4f00-bbbb-be5f0e000026",
+      "name": "Transcript Passthrough",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Haalt het transcript uit de whisper-respons en knipt het in blokken.\n//\n// Waarom knippen: de Ollama-node draait met numCtx 8192, waarvan na aftrek van\n// de output ~6000 tokens voor de prompt overblijven. 9000 tekens transcript is\n// ruwweg 2300 tokens en laat ruim marge voor instructies. Eén blok komt overeen\n// met ongeveer een kwartier spreektijd. Is de bespreking langer, dan vat de\n// workflow eerst elk blok apart samen (map) en bouwt daarna het verslag uit die\n// deelsamenvattingen (reduce) — zo verdwijnt het tweede uur niet stilzwijgend\n// uit het verslag.\nconst BLOK_TEKENS = 9000;\n\nconst fs = require('fs');\nconst JOB_PAD = `/data/shared/jobs/${$('Prepare Audio').first().json.jobId}.json`;\n\nfunction werkJobBij(velden) {\n  let job = {};\n  try {\n    job = JSON.parse(fs.readFileSync(JOB_PAD, 'utf8'));\n  } catch (_) {\n    // Jobbestand weg (handmatig opgeruimd?): dan schrijven we het opnieuw aan.\n  }\n  const nieuw = { ...job, ...velden, bijgewerkt_op: new Date().toISOString() };\n  fs.writeFileSync(JOB_PAD, JSON.stringify(nieuw), 'utf8');\n  return nieuw;\n}\n\nconst resp = $json || {};\n\n// De whisper-node draait met onError=continueRegularOutput, zodat een niet-\n// draaiende server hier netjes in het jobbestand belandt in plaats van de\n// workflow stil te laten sneuvelen — de webapp pollt en zou anders blijven\n// wachten op een antwoord dat nooit komt.\nif (resp.error) {\n  const melding =\n    'Whisper antwoordde niet. Draait de server? Start met ./shared/whisper/start-whisper-server.sh';\n  werkJobBij({ status: 'fout', fout: melding });\n  throw new Error(melding);\n}\n\n// whisper-server geeft {\"text\": \"...\"}; bij response_format=verbose_json zit de\n// tekst in dezelfde sleutel, met segments ernaast.\nlet transcript = String(resp.text || resp.transcript || '').trim();\nif (!transcript && Array.isArray(resp.segments)) {\n  transcript = resp.segments.map((s) => s.text || '').join(' ').trim();\n}\nif (!transcript) {\n  const melding = 'Whisper gaf een leeg transcript terug. Bevat de opname spraak?';\n  werkJobBij({ status: 'fout', fout: melding });\n  throw new Error(melding);\n}\n\n// Knip op zinseinde in plaats van middenin een woord: een blok dat halverwege\n// een bedrag of naam afbreekt levert onbruikbare deelsamenvattingen op.\nfunction knip(tekst, max) {\n  const blokken = [];\n  let rest = tekst;\n  while (rest.length > max) {\n    const venster = rest.slice(0, max);\n    let snij = Math.max(\n      venster.lastIndexOf('. '),\n      venster.lastIndexOf('? '),\n      venster.lastIndexOf('! ')\n    );\n    if (snij < max * 0.5) snij = venster.lastIndexOf(' ');\n    if (snij <= 0) snij = max;\n    blokken.push(rest.slice(0, snij + 1).trim());\n    rest = rest.slice(snij + 1).trim();\n  }\n  if (rest) blokken.push(rest);\n  return blokken;\n}\n\nconst blokken = knip(transcript, BLOK_TEKENS);\n\nwerkJobBij({ status: 'samenvatten', fase: 2, blok_aantal: blokken.length });\n\nreturn [{\n  json: {\n    transcript,\n    transcript_tekens: transcript.length,\n    blokken,\n    blok_aantal: blokken.length,\n    meerdere_blokken: blokken.length > 1,\n  },\n}];"
+      },
+      "id": "d1e2f3a4-0015-4f00-bbbb-be5f0e000015",
+      "name": "Extract Transcript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        600,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d1e2f3a4-cond-blokken",
+              "leftValue": "={{ $json.meerdere_blokken }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d1e2f3a4-0016-4f00-bbbb-be5f0e000016",
+      "name": "Lange bespreking?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        780,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Zet elk transcript-blok om in een eigen item, zodat de chain-node er één\n// LLM-aanroep per blok van maakt (de map-stap).\n//\n// Is er een sjabloon (testament, levenstestament), dan vat elk blok meteen samen\n// ÓNDER de vaste kopjes. Dat is bewust: eerder vatte de map-stap elk blok vrij\n// samen en moest de verslag-ronde de flarden daarna alsnog onder 17 juridische\n// kopjes sorteren. Dat lukte niet — bij een echte bespreking van 46 minuten bleven\n// 14 van de 17 kopjes leeg en belandde \"60% naar Kline Clowns\" onder \"Overige\"\n// in plaats van onder \"Legaten\". De details die je nodig hebt om zoiets te\n// herkennen, waren in de samenvatstap al weggevallen.\nconst fs = require('fs');\n\nconst bron = $json || {};\nconst blokken = Array.isArray(bron.blokken) ? bron.blokken : [];\nconst meta = $('Prepare Audio').first()?.json || {};\n\n// Achtergrond van de behandelaar. Staat vóór het transcriptdeel zodat het model\n// weet hoe het de tekst moet lezen — bij een spreker die stottert of hakkelt is\n// een herhaling geen nadruk maar ruis. Nadrukkelijk als achtergrond aangemerkt,\n// anders belandt de waarneming zelf als besproken punt in het verslag.\nconst waarneming = String(meta.context || '').trim();\nconst waarnemingBlok = waarneming\n  ? `ACHTERGROND VAN DE BEHANDELAAR (over hoe het gesprek verliep, niet over de inhoud — schrijf dit nooit over als punt)\n${waarneming}\n\n`\n  : '';\n\nlet sjabloon = null;\ntry {\n  const soort = String(meta.soort || '').replace(/[^a-z]/gi, '').toLowerCase();\n  if (soort && soort !== 'algemeen') {\n    sjabloon = JSON.parse(\n      fs.readFileSync(`/data/shared/templates/besprekingen/${soort}.json`, 'utf8')\n    );\n  }\n} catch (_) {\n  // Geen sjabloon: dan de vrije samenvatting hieronder.\n}\n\n// Deterministische voorselectie: welke kopjes komen in dít blok waarschijnlijk\n// aan de orde? Puur op trefwoorden uit het sjabloon, zonder model. Reden: het\n// model zette de legaten aan de stichtingen onder \"Uitsluitingsclausule\" — een\n// kopje dat leeg had moeten blijven — terwijl \"stichting\" letterlijk in de tekst\n// staat. Zo'n aanwijzing kost niets en stuurt precies daar bij.\nfunction raakKopjes(blok) {\n  const tekst = blok.toLowerCase();\n  return sjabloon.secties\n    .filter((sec) => (sec.trefwoorden || []).some((w) => tekst.includes(String(w).toLowerCase())))\n    .map((sec) => sec.kop);\n}\n\nfunction promptMetSjabloon(blok, i, totaal) {\n  // De volledige aanwijzing per kopje, niet een afkorting: met korte hints zakte\n  // het aantal gevulde kopjes van 11 naar 8 en belandden de legaten weer onder\n  // \"Overige\". De prompt wordt er groot van (~12.600 tekens), maar sinds de\n  // blokken één voor één draaien is dat geen probleem meer.\n  const raak = raakKopjes(blok);\n  const laatsteKop = sjabloon.secties[sjabloon.secties.length - 1].kop;\n  const koppen = sjabloon.secties\n    .map((sec) => `- ${sec.kop}: ${sec.aanwijzing}`)\n    .join('\\n');\n  const leegSchema = sjabloon.secties\n    .map((sec) => `    \"${sec.kop}\": []`)\n    .join(',\\n');\n\n  return `Hieronder staat deel ${i + 1} van ${totaal} van een automatisch transcript van een notariële bespreking (${sjabloon.naam}).\n\nOrden wat er in DIT deel is besproken onder de vaste kopjes hieronder. Gebruik uitsluitend wat er staat; verzin niets.\n\n${waarnemingBlok}KOPJES (de tekst achter de dubbele punt is een aanwijzing voor jou — schrijf die nooit over als inhoud)\n${koppen}\n\n${raak.length ? `LET OP — in dit deel vallen woorden die horen bij: ${raak.join(', ')}. Kijk of die kopjes hier gevuld moeten worden. Het omgekeerde geldt ook: een kopje dat hier niet tussen staat, is hier waarschijnlijk niet aan de orde.\\n` : ''}\nREGELS\n- Schrijf wat er over het onderwerp is gezegd, met de inhoud erbij.\n- Een kopje blijft alleen leeg als het onderwerp helemaal niet ter sprake kwam.\n- Hooguit zes punten per kopje, één korte zin per punt.\n- Noem concrete namen, bedragen en percentages als die vallen; juist die maken het punt bruikbaar.\n- Twijfel je onder welk kopje iets hoort, kies dan het meest specifieke kopje dat past. Gebruik \"${laatsteKop}\" alleen als het echt nergens onder valt.\n\nGeef alleen geldige JSON terug:\n{\n  \"secties\": {\n${leegSchema}\n  },\n  \"afspraken\": [\"afspraken die in dit deel zijn gemaakt\"],\n  \"namen\": [\"namen of rollen die in dit deel vallen\"]\n}\n\nTRANSCRIPT-DEEL\n${blok}`;\n}\n\nfunction promptVrij(blok, i, totaal) {\n  return `Hieronder staat deel ${i + 1} van ${totaal} van een automatisch transcript van een notariële bespreking.\n\nVat dit deel samen in korte, feitelijke punten. Gebruik uitsluitend wat er staat; verzin niets. Laat een lijst alleen leeg als er echt niets over gezegd is.\n\n${waarnemingBlok}Houd het compact: hooguit acht punten per lijst en één korte zin per punt. Een te lang antwoord wordt afgekapt en is dan onbruikbaar.\n\nGeef alleen geldige JSON terug:\n{\n  \"besproken\": [\"korte punten over wat er in dit deel is besproken\"],\n  \"afspraken\": [\"afspraken die in dit deel zijn gemaakt\"],\n  \"namen\": [\"namen of rollen die in dit deel vallen\"]\n}\n\nTRANSCRIPT-DEEL\n${blok}`;\n}\n\nreturn blokken.map((blok, i) => ({\n  json: {\n    blokIndex: i + 1,\n    blokTotaal: blokken.length,\n    sjabloonSoort: sjabloon ? sjabloon.soort : null,\n    chatInput: sjabloon\n      ? promptMetSjabloon(blok, i, blokken.length)\n      : promptVrij(blok, i, blokken.length),\n  },\n}));"
+      },
+      "id": "d1e2f3a4-0017-4f00-bbbb-be5f0e000017",
+      "name": "Split Blokken",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "d1e2f3a4-0035-4f00-bbbb-be5f0e000035",
+      "name": "Loop Blokken",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        940,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Werkt het jobbestand bij na elk samengevat blok en geeft het item door aan de\n// lus. Zonder dit ligt de status stil zolang de blokken draaien.\nconst fs = require('fs');\nconst JOB_PAD = `/data/shared/jobs/${$('Prepare Audio').first().json.jobId}.json`;\n\nfunction werkJobBij(velden) {\n  let job = {};\n  try {\n    job = JSON.parse(fs.readFileSync(JOB_PAD, 'utf8'));\n  } catch (_) {\n    // Jobbestand weg (handmatig opgeruimd?): dan schrijven we het opnieuw aan.\n  }\n  const nieuw = { ...job, ...velden, bijgewerkt_op: new Date().toISOString() };\n  fs.writeFileSync(JOB_PAD, JSON.stringify(nieuw), 'utf8');\n  return nieuw;\n}\n\nconst totaal = Number($('Split Blokken').first()?.json?.blokTotaal || 0);\nconst gedaan = $runIndex + 1;\n\nwerkJobBij({\n  status: 'samenvatten',\n  fase: 2,\n  blok_voortgang: totaal ? `${Math.min(gedaan, totaal)}/${totaal}` : String(gedaan),\n});\n\nreturn $input.all();"
+      },
+      "id": "d1e2f3a4-0036-4f00-bbbb-be5f0e000036",
+      "name": "Blok Hartslag",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        380
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d1e2f3a4-0018-4f00-bbbb-be5f0e000018",
+      "name": "Blok LLM Chain",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        940,
+        80
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": "qwen2.5:7b",
+        "options": {
+          "temperature": 0,
+          "format": "json",
+          "numCtx": 8192,
+          "numPredict": 1024,
+          "keepAlive": "30m"
+        }
+      },
+      "id": "d1e2f3a4-0019-4f00-bbbb-be5f0e000019",
+      "name": "Blok Ollama Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        940,
+        -100
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "xHuYe0MDGOs9IpBW",
+          "name": "Local Ollama service"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reduce-stap: voegt de deelsamenvattingen samen tot één compacte basistekst\n// waar de verslag-prompt mee verder kan.\nfunction haalObject(j) {\n  if (!j || typeof j !== 'object') return null;\n  for (const k of ['text', 'output', 'answer', 'response']) {\n    if (typeof j[k] === 'string' && j[k]) {\n      try {\n        const s = j[k].replace(/```(?:json)?/gi, '').trim();\n        return JSON.parse(s.slice(s.indexOf('{'), s.lastIndexOf('}') + 1));\n      } catch (_) {\n        return { besproken: [String(j[k])] };\n      }\n    }\n  }\n  const kopie = { ...j };\n  delete kopie.pairedItem;\n  return Object.keys(kopie).length ? kopie : null;\n}\n\nfunction lijst(v) {\n  if (!v) return [];\n  return (Array.isArray(v) ? v : [v]).map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).filter(Boolean);\n}\n\nconst fs = require('fs');\nconst JOB_PAD = `/data/shared/jobs/${$('Prepare Audio').first().json.jobId}.json`;\n\nfunction werkJobBij(velden) {\n  let job = {};\n  try {\n    job = JSON.parse(fs.readFileSync(JOB_PAD, 'utf8'));\n  } catch (_) {\n    // Jobbestand weg (handmatig opgeruimd?): dan schrijven we het opnieuw aan.\n  }\n  const nieuw = { ...job, ...velden, bijgewerkt_op: new Date().toISOString() };\n  fs.writeFileSync(JOB_PAD, JSON.stringify(nieuw), 'utf8');\n  return nieuw;\n}\n\nwerkJobBij({ status: 'samenvatten', fase: 2 });\n\nconst delen = [];\nconst sectiesSamen = {};\nlet mislukt = 0;\nconst items = $input.all();\nitems.forEach((item, i) => {\n  // Node draait met onError=continueRegularOutput: een blok dat de LLM niet kon\n  // samenvatten komt hier binnen met een error-veld in plaats van inhoud.\n  if (item.json && item.json.error) {\n    mislukt += 1;\n    return;\n  }\n  const obj = haalObject(item.json);\n  if (!obj) {\n    mislukt += 1;\n    return;\n  }\n  // Sjabloon-variant: de blokken leveren hun punten al onder de vaste kopjes.\n  // Die worden hier over de blokken heen samengevoegd, zodat de volgorde en de\n  // toewijzing niet meer van de verslag-ronde afhangen.\n  if (obj.secties && typeof obj.secties === 'object') {\n    for (const [kop, waarde] of Object.entries(obj.secties)) {\n      const punten = lijst(waarde);\n      if (!punten.length) continue;\n      if (!sectiesSamen[kop]) sectiesSamen[kop] = [];\n      for (const punt of punten) {\n        // Blokken overlappen niet, maar hetzelfde onderwerp komt soms terug;\n        // letterlijke herhaling eruit.\n        if (!sectiesSamen[kop].some((b) => b.toLowerCase() === punt.toLowerCase())) {\n          sectiesSamen[kop].push(punt);\n        }\n      }\n    }\n  }\n\n  const regels = [];\n  const secties = [\n    ['Besproken', obj.besproken],\n    ['Afspraken', obj.afspraken],\n    ['Namen', obj.namen],\n  ];\n  for (const [kop, waarde] of secties) {\n    const punten = lijst(waarde);\n    if (punten.length) regels.push(`${kop}: ${punten.join('; ')}`);\n  }\n  // Bij de sjabloon-variant vormen de gevulde kopjes zelf de basistekst voor de\n  // verslag-ronde; die schrijft daarmee de samenvatting en de titel.\n  if (obj.secties && typeof obj.secties === 'object') {\n    for (const [kop, waarde] of Object.entries(obj.secties)) {\n      const punten = lijst(waarde);\n      if (punten.length) regels.push(`${kop}: ${punten.join('; ')}`);\n    }\n  }\n  if (regels.length) delen.push(`--- Deel ${i + 1} ---\\n${regels.join('\\n')}`);\n});\n\n// Vangnet: bij een extreem lange bespreking (ruwweg 2 uur en meer) lopen ook de\n// deelsamenvattingen samen het venster uit. Dan zou een tweede reduce-ronde\n// nodig zijn; zolang die er niet is, kappen we af én melden we dat.\nconst MAX_BASIS = 12000;\nlet basis = delen.join('\\n\\n');\nconst basisAfgekapt = basis.length > MAX_BASIS;\nif (basisAfgekapt) basis = basis.slice(0, MAX_BASIS) + '\\n\\n[... deelsamenvattingen afgekapt ...]';\n\nif (!basis) {\n  throw new Error(\n    `Geen enkel van de ${items.length} transcript-blokken kon worden samengevat.`\n  );\n}\n\nreturn [{\n  json: {\n    basis,\n    basis_soort: 'deelsamenvattingen',\n    basis_afgekapt: basisAfgekapt,\n    // Per kopje samengevoegd over alle blokken; Orden Secties gebruikt dit als\n    // primaire bron, want het is completer dan wat de verslag-ronde eruit haalt.\n    secties_uit_blokken: Object.keys(sectiesSamen).length ? sectiesSamen : null,\n    blokken_mislukt: mislukt,\n    blokken_totaal: items.length,\n  },\n}];"
+      },
+      "id": "d1e2f3a4-0020-4f00-bbbb-be5f0e000020",
+      "name": "Collect Blok Samenvattingen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Korte bespreking: het transcript past in één prompt, dus de map-stap wordt\n// overgeslagen en de ruwe tekst gaat rechtstreeks naar de verslag-prompt.\nreturn [{\n  json: {\n    basis: String($json.transcript || ''),\n    basis_soort: 'transcript',\n    basis_afgekapt: false,\n  },\n}];"
+      },
+      "id": "d1e2f3a4-0021-4f00-bbbb-be5f0e000021",
+      "name": "Transcript Direct",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Bouwt de prompt voor het besprekingsverslag. De basis is óf het volledige\n// transcript (korte bespreking) óf de samengevoegde deelsamenvattingen uit de\n// map-stap (lange bespreking); beide takken leveren hetzelfde veld `basis`.\nconst meta = $('Prepare Audio').first()?.json || {};\nconst bron = $('Extract Transcript').first()?.json || {};\nconst invoer = $json || {};\n\nconst basis = String(invoer.basis || '');\nif (!basis) {\n  throw new Error('Geen tekst om een verslag van te maken.');\n}\n\nconst uitDelen = invoer.basis_soort === 'deelsamenvattingen';\nconst kopje = uitDelen\n  ? `SAMENVATTINGEN PER DEEL (de bespreking is in ${bron.blok_aantal || '?'} delen samengevat)`\n  : 'TRANSCRIPT';\n\nconst context = [];\nif (meta.onderwerp) context.push(`Onderwerp volgens de behandelaar: ${meta.onderwerp}`);\nif (meta.dossier) context.push(`Dossiernummer: ${meta.dossier}`);\nif (meta.deelnemers_invoer) context.push(`Bekende deelnemers: ${meta.deelnemers_invoer}`);\n// Waarneming van de behandelaar over het verloop van het gesprek. Expliciet\n// gelabeld als niet-uit-het-transcript, zodat het model het gebruikt om te\n// duiden en niet als besproken punt noteert; het staat verderop sowieso al\n// letterlijk in het verslag.\nif (meta.context) {\n  context.push(\n    'Waarnemingen van de behandelaar over het verloop van het gesprek (niet uit het transcript; ' +\n      'gebruik ze om het gesprek te duiden, neem ze niet over als besproken punt): ' +\n      String(meta.context).replace(/\\s*\\n\\s*/g, ' | ')\n  );\n}\n\n// Sjabloon voor een testament- of levenstestamentbespreking. Staat er een, dan\n// krijgt het model de vaste kopjes mee. De vólgorde wordt hierna alsnog in code\n// afgedwongen (Orden Secties); deze aanwijzing dient om de inhoud onder het\n// juiste kopje te krijgen, niet om op het model te vertrouwen voor de volgorde.\nconst fs = require('fs');\nconst SJABLOON_DIR = '/data/shared/templates/besprekingen';\n\nfunction laadSjabloon(soort) {\n  if (!soort || soort === 'algemeen') return null;\n  try {\n    const naam = String(soort).replace(/[^a-z]/gi, '').toLowerCase();\n    return JSON.parse(fs.readFileSync(`${SJABLOON_DIR}/${naam}.json`, 'utf8'));\n  } catch (_) {\n    return null;\n  }\n}\n\nconst sjabloon = laadSjabloon(meta.soort);\n\nlet sjabloonBlok = '';\nif (sjabloon && Array.isArray(sjabloon.secties)) {\n  const regels = sjabloon.secties\n    .map((s, i) => `${i + 1}. ${s.kop} — ${s.aanwijzing}`)\n    .join('\\n');\n  sjabloonBlok = `VASTE INDELING (${sjabloon.naam})\nVul \"onderwerpen\" met exact deze kopjes, in deze volgorde, en gebruik de kop letterlijk zoals hier geschreven. Wat wel is besproken maar nergens onder valt, hoort onder het laatste kopje.\n\nDe tekst achter het streepje is een aanwijzing vóór jou over wat er onder dat kopje hoort. Schrijf die aanwijzing NOOIT over als inhoud.\n\nEen kopje krijgt alleen een lege lijst als het onderwerp helemaal niet ter sprake kwam.\n\n${regels}\n\n`;\n}\n\nconst chatInput = `Je bent notarieel secretaris. Hieronder staat het materiaal van een bespreking op een notariskantoor. Werk het uit tot een zakelijk verslag.\n\nHARDE REGELS\n- Gebruik uitsluitend wat er staat. Verzin geen namen, bedragen, data of afspraken.\n- Weet je iets niet, laat het veld dan leeg (lege string of lege lijst). Vul nooit iets aan \"voor de volledigheid\".\n- Het transcript is machinaal gemaakt en kan verhaspelingen bevatten. Neem een naam of bedrag alleen op als die duidelijk uit de tekst blijkt.\n- Schrijf in zakelijk Nederlands, derde persoon, verleden tijd.\n- Geef alleen geldige JSON terug, zonder toelichting eromheen.\n\n${context.length ? 'CONTEXT\\n' + context.join('\\n') + '\\n' : ''}\n${sjabloonBlok}JSON-SCHEMA\n{\n  \"titel\": \"korte titel van de bespreking\",\n  \"samenvatting\": \"Begin met waaróver de bespreking ging en wat de uitkomst was — bijvoorbeeld: het bestaande testament is doorgenomen en blijft in stand, met één wijziging: de voogdij. Daarna 4 tot 7 zinnen met de hoofdpunten. Som geen kopjes op.\",\n  \"onderwerpen\": [{\"kop\": \"onderwerp\", \"punten\": [\"wat er over gezegd is\"]}],\n  \"afspraken\": [\"concrete afspraken die zijn gemaakt\"],\n  \"open_vragen\": [\"vragen die in de bespreking onbeantwoord bleven\"]\n}\n\n${kopje}\n${basis}`;\n\nreturn [{\n  json: {\n    chatInput,\n    sjabloon_soort: sjabloon ? sjabloon.soort : null,\n    basis_soort: invoer.basis_soort || 'transcript',\n    basis_afgekapt: !!invoer.basis_afgekapt,\n    blokken_mislukt: invoer.blokken_mislukt || 0,\n    blokken_totaal: invoer.blokken_totaal || 1,\n  },\n}];"
+      },
+      "id": "d1e2f3a4-0004-4f00-bbbb-be5f0e000004",
+      "name": "Build Verslag Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d1e2f3a4-0005-4f00-bbbb-be5f0e000005",
+      "name": "Verslag LLM Chain",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1480,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "model": "qwen2.5:7b",
+        "options": {
+          "temperature": 0.1,
+          "format": "json",
+          "numCtx": 8192,
+          "numPredict": 2048,
+          "keepAlive": "30m"
+        }
+      },
+      "id": "d1e2f3a4-0006-4f00-bbbb-be5f0e000006",
+      "name": "Verslag Ollama Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        1480,
+        20
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "xHuYe0MDGOs9IpBW",
+          "name": "Local Ollama service"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parseert de LLM-output tot een verslag-object. Faalt de parse, dan levert de\n// workflow alsnog een document met alleen het transcript — een mislukte\n// samenvatting mag de opname niet weggooien.\nconst bron = $('Extract Transcript').first()?.json || {};\nconst prompt = $('Build Verslag Prompt').first()?.json || {};\nconst meta = $('Prepare Audio').first()?.json || {};\n\n// Met options.format='json' geeft de chainLlm-node het geparste object al als\n// $json terug (dus géén .text-veld). Zonder die optie komt de tekst als string\n// binnen, eventueel in een markdown-fence. Beide gevallen afvangen.\nfunction haalRuw(j) {\n  if (!j || typeof j !== 'object') return '';\n  for (const k of ['text', 'output', 'answer', 'response']) {\n    if (typeof j[k] === 'string' && j[k]) return j[k];\n  }\n  if (typeof j?.message?.content === 'string' && j.message.content) return j.message.content;\n  const kopie = { ...j };\n  delete kopie.pairedItem;\n  return Object.keys(kopie).length ? kopie : '';\n}\n\nfunction parseJson(invoer) {\n  if (invoer && typeof invoer === 'object') return invoer;\n  let s = String(invoer || '').trim();\n  const fence = s.match(/```(?:json)?\\s*([\\s\\S]*?)```/i);\n  if (fence) s = fence[1].trim();\n  const start = s.indexOf('{');\n  const eind = s.lastIndexOf('}');\n  if (start !== -1 && eind > start) s = s.slice(start, eind + 1);\n  try {\n    return JSON.parse(s);\n  } catch (_) {\n    return null;\n  }\n}\n\nconst parsed = parseJson(haalRuw($json));\nlet parseWaarschuwing = null;\n\nconst verslag = parsed && typeof parsed === 'object' ? parsed : {};\nif (!parsed) {\n  parseWaarschuwing =\n    'De samenvatting kon niet als JSON worden gelezen; het verslag bevat alleen het transcript.';\n  verslag.titel = 'Besprekingsverslag (samenvatting mislukt)';\n  verslag.samenvatting = '';\n}\n\nfunction lijst(v) {\n  if (!v) return [];\n  return Array.isArray(v) ? v.filter(Boolean) : [v];\n}\n\n// Het model houdt zich niet strikt aan \"array van strings\": afspraken komen er\n// geregeld uit als {afspraak, eigenaar, termijn}. Platslaan tot leesbare regels,\n// anders belandt \"[object Object]\" in het document.\nfunction tekst(v) {\n  if (v == null) return '';\n  if (typeof v !== 'object') return String(v);\n  const kern = v.afspraak || v.omschrijving || v.actie || v.punt || v.tekst || v.titel || '';\n  const staart = [v.eigenaar || v.wie, v.termijn || v.deadline].filter(Boolean).join(' · ');\n  const basis = String(kern || JSON.stringify(v));\n  return staart ? `${basis}  (${staart})` : basis;\n}\n\nconst genormaliseerd = {\n  titel: String(verslag.titel || '').trim(),\n  samenvatting: String(verslag.samenvatting || '').trim(),\n  // Aanwezigen komen uitsluitend uit het veld dat de behandelaar invult, niet\n  // uit het transcript. Whisper verhaspelt namen, en het model haalde er ook\n  // mensen bij die alleen ter sprake kwamen — een erflater of een bank is geen\n  // aanwezige. Leeg veld betekent dus geen kopje 'Aanwezig' in het verslag.\n  deelnemers: String(meta.deelnemers_invoer || '')\n    .split(/[,;\\n]/)\n    .map((naam) => naam.trim())\n    .filter(Boolean)\n    .filter((naam, i, alle) => alle.findIndex((n) => n.toLowerCase() === naam.toLowerCase()) === i),\n  // Waarnemingen komen letterlijk uit het invoerveld, net als de deelnemers:\n  // het is de eigen vastlegging van de behandelaar en het model heeft er niets\n  // aan toe te voegen of van af te doen.\n  waarnemingen: String(meta.context || '')\n    .split(/\\n+/)\n    .map((regel) => regel.trim())\n    .filter(Boolean),\n  onderwerpen: lijst(verslag.onderwerpen),\n  afspraken: lijst(verslag.afspraken).map(tekst),\n  open_vragen: lijst(verslag.open_vragen).map(tekst),\n};\n\nreturn [{\n  json: {\n    verslag: genormaliseerd,\n    transcript: bron.transcript || '',\n    blok_aantal: bron.blok_aantal || 1,\n    basis_afgekapt: !!prompt.basis_afgekapt,\n    blokken_mislukt: prompt.blokken_mislukt || 0,\n    parse_waarschuwing: parseWaarschuwing,\n    counts: {\n      afspraken: genormaliseerd.afspraken.length,\n    },\n  },\n}];"
+      },
+      "id": "d1e2f3a4-0007-4f00-bbbb-be5f0e000007",
+      "name": "Parse Verslag JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Dwingt de sjabloonvolgorde af. Het model krijgt de kopjes wel in de prompt,\n// maar houdt zich er niet betrouwbaar aan: het laat kopjes weg, hernoemt ze of\n// wisselt de volgorde. Daarom hier deterministisch herordenen — dan is het\n// verslag van elke testamentbespreking op dezelfde plek te lezen.\n//\n// Kopjes die niet aan bod kwamen blijven staan met een lege puntenlijst; de\n// DOCX-generator zet daar \"Niet besproken\" onder. Voor een bespreekformulier is\n// dat juist waardevol: het laat zien wat nog open staat.\nconst fs = require('fs');\nconst meta = $('Prepare Audio').first()?.json || {};\nconst invoer = $json || {};\n\nfunction laadSjabloon(soort) {\n  if (!soort || soort === 'algemeen') return null;\n  try {\n    const naam = String(soort).replace(/[^a-z]/gi, '').toLowerCase();\n    return JSON.parse(\n      fs.readFileSync(`/data/shared/templates/besprekingen/${naam}.json`, 'utf8')\n    );\n  } catch (_) {\n    return null;\n  }\n}\n\nconst sjabloon = laadSjabloon(meta.soort);\n\n// Geen sjabloon (algemene bespreking): alles ongemoeid doorgeven.\nif (!sjabloon || !Array.isArray(sjabloon.secties) || !sjabloon.secties.length) {\n  return [{ json: { ...invoer, sjabloon_toegepast: null } }];\n}\n\nconst verslag = { ...(invoer.verslag || {}) };\nconst gevonden = Array.isArray(verslag.onderwerpen) ? verslag.onderwerpen : [];\n\nfunction normaliseer(tekst) {\n  return String(tekst || '')\n    .toLowerCase()\n    .replace(/[^a-z0-9À-ſ ]+/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nconst STOP = new Set(['en', 'de', 'het', 'een', 'van', 'voor', 'bij', 'over']);\nfunction woorden(tekst) {\n  return new Set(normaliseer(tekst).split(' ').filter((w) => w.length > 3 && !STOP.has(w)));\n}\n\nfunction past(kopA, kopB) {\n  const a = normaliseer(kopA), b = normaliseer(kopB);\n  if (!a || !b) return 0;\n  if (a === b) return 1;\n  if (a.includes(b) || b.includes(a)) return 0.9;\n  const A = woorden(a), B = woorden(b);\n  if (!A.size || !B.size) return 0;\n  let gedeeld = 0;\n  for (const w of A) if (B.has(w)) gedeeld += 1;\n  return gedeeld / Math.min(A.size, B.size);\n}\n\nfunction puntenVan(onderwerp) {\n  if (typeof onderwerp === 'string') return [onderwerp];\n  const p = onderwerp?.punten ?? onderwerp?.inhoud;\n  if (!p) return [];\n  return (Array.isArray(p) ? p : [p]).map((x) => String(x)).filter(Boolean);\n}\n\nconst nogTeVerdelen = gevonden.map((o) => ({\n  kop: typeof o === 'string' ? '' : String(o?.kop || o?.titel || ''),\n  punten: puntenVan(o),\n}));\n\n// Bij een lange bespreking hebben de blokken hun punten al onder de vaste kopjes\n// gezet (zie Split Blokken). Dat is de rijkste bron: die punten zijn gemaakt met\n// het volledige transcript-deel in beeld, terwijl de verslag-ronde het met\n// samengevatte flarden moet doen. Daarom gaan die eerst.\nconst transcriptTekst = String(\n  ($('Extract Transcript').first()?.json || {}).transcript || ''\n).toLowerCase();\n\nlet uitBlokken = {};\ntry {\n  uitBlokken = $('Collect Blok Samenvattingen').first()?.json?.secties_uit_blokken || {};\n} catch (_) {\n  // Korte bespreking: de map-stap heeft niet gedraaid.\n}\n\n// Vangnet tegen een lek dat in de praktijk optrad: het model schreef de\n// aanwijzing achter een kopje over als inhoud, waardoor \"Tweetrapsmaking\" gevuld\n// leek terwijl het onderwerp nooit ter sprake kwam. Een punt dat vrijwel gelijk\n// is aan de aanwijzing van zijn eigen sectie is geen verslag maar een echo.\nconst alleAanwijzingen = sjabloon.secties.map((s) => String(s.aanwijzing || ''));\n\n// Zelfde vangnet voor de waarneming van de behandelaar. De prompt zegt dat het\n// achtergrond is en geen besproken punt, maar dat is precies het soort instructie\n// waar dit model overheen leest — en de waarneming staat verderop toch al\n// letterlijk in het verslag.\nconst waarnemingRegels = String(meta.context || '')\n  .split(/\\n+/)\n  .map((r) => r.trim())\n  .filter((r) => r.length > 8);\n\nfunction isEchoVanAanwijzing(punt, eigenAanwijzing) {\n  if (past(punt, eigenAanwijzing) >= 0.7) return true;\n  if (waarnemingRegels.some((r) => past(punt, r) >= 0.8)) return true;\n  return alleAanwijzingen.some((a) => past(punt, a) >= 0.8);\n}\n\n// Gevraagd om een leeg kopje leeg te laten, schrijft het model er geregeld\n// \"geen bespreking\" of \"niet besproken\" in. Dat is geen inhoud maar een lege\n// lijst in woorden; hier wordt het weer een echt leeg kopje, zodat het verslag\n// overal dezelfde formulering gebruikt.\n// Strikt: alleen een kále mededeling dat er niets is besproken gaat eruit.\n// Eerder was dit ruimer en sneuvelde ook \"Geen bewind; wel een toelichting in het\n// concept\" — precies de afgewezen keuze die wél in het verslag hoort.\nconst KAAL_LEEG = /^(niet|geen)\\s+(besproken|bespreking|aan de orde|aan bod|van toepassing|genoemd|vermeld|gezegd|behandeld|vastgelegd|ingevuld|opgenomen|gekozen|afgesproken|ter sprake gekomen|ter sprake|aan bod gekomen)$/i;\nconst KAAL_NVT = /^(nvt|n\\.?v\\.?t\\.?|onbekend|niets|geen|niet)$/i;\n\n// Het model verzint eindeloos nieuwe manieren om \"hier staat niets\" te zeggen:\n// \"Niet besproken\", \"Niet ter sprake gekomen\", \"Geen specifieke voogdij\". Een\n// woordenlijst bijhouden is dweilen. Deze regel generaliseert: begint het punt\n// met een ontkenning en blijft er ná het wegstrepen van de kopwoorden niets\n// inhoudelijks over, dan staat er niets. \"Geen bewind; wel een toelichting in\n// het concept\" houdt wél inhoud over en blijft dus staan.\nconst VULWOORDEN = new Set([\n  'de','het','een','van','en','voor','bij','over','er','is','zijn','wordt',\n  'worden','of','specifieke','specifiek','aparte','apart','nadere','verdere',\n]);\n\nfunction losseWoorden(tekst) {\n  return String(tekst).toLowerCase().replace(/[^a-z0-9À-ÿ ]+/g, ' ').split(/\\s+/).filter(Boolean);\n}\n\nfunction zegtAlleenNiets(punt, kop) {\n  const w = losseWoorden(punt);\n  if (!w.length) return true;\n  if (!/^(geen|niet|nvt|niets)$/.test(w[0])) return false;\n  const kopWoorden = new Set(losseWoorden(kop));\n  return w.slice(1).filter((x) => !VULWOORDEN.has(x) && !kopWoorden.has(x) && x.length > 2).length === 0;\n}\n\nfunction isLegeMelding(punt) {\n  const t = String(punt || '').trim().replace(/[.;:!]+$/, '');\n  if (!t) return true;\n  if (t.length > 30) return false;\n  return KAAL_NVT.test(t) || KAAL_LEEG.test(t);\n}\n\nconst geordend = sjabloon.secties.map((sectie) => {\n  let punten = [];\n\n  // 1. Wat de blokken onder dit kopje zetten.\n  for (const [kop, waarde] of Object.entries(uitBlokken)) {\n    if (past(sectie.kop, kop) >= 0.6 && Array.isArray(waarde)) {\n      punten.push(...waarde.map((x) => String(x)));\n    }\n  }\n\n  // 2. Aangevuld met wat de verslag-ronde onder hetzelfde kopje zette.\n  for (let i = nogTeVerdelen.length - 1; i >= 0; i--) {\n    if (past(sectie.kop, nogTeVerdelen[i].kop) >= 0.6) {\n      for (const punt of nogTeVerdelen[i].punten) {\n        if (!punten.some((b) => past(b, punt) >= 0.7)) punten.push(punt);\n      }\n      nogTeVerdelen.splice(i, 1);\n    }\n  }\n\n  punten = punten.filter(\n    (p) =>\n      !isLegeMelding(p) &&\n      !zegtAlleenNiets(p, sectie.kop) &&\n      !isEchoVanAanwijzing(p, sectie.aanwijzing || '')\n  );\n\n  // Het model zet er soms \"Geen specifieke wijzigingen besproken\" bóven een lijst\n  // mét wijzigingen. Zo'n regel spreekt de rest van het kopje tegen; weg ermee,\n  // maar alléén als er inhoud naast staat. Is het het enige punt, dan is het\n  // gewoon de mededeling dat er niets was.\n  if (punten.length > 1) {\n    const ZEGT_NIETS = /^(er (is|zijn|was|waren) )?(geen|niets|niet)\\b[^.]{0,60}\\b(besproken|genoemd|vermeld|vastgelegd|aan de orde|gekozen|afgesproken)/i;\n    const inhoudelijk = punten.filter((p) => !ZEGT_NIETS.test(String(p).trim()));\n    if (inhoudelijk.length) punten = inhoudelijk;\n  }\n\n  // Vangnet voor een onderwerp dat wél ter sprake kwam maar waar het model niets\n  // van maakte — typisch wanneer ervan wordt afgezien (\"de vaccinatieclausule?\n  // nee, laat maar zitten\"). Vragen om dat toch te noteren hielp niet: gemeten\n  // bleef het kopje leeg. Deterministisch signaleren dat het woord in het\n  // transcript valt is wél betrouwbaar, en voor een bespreekformulier is \"hier is\n  // over gesproken, kijk even\" bruikbaarder dan een kopje dat suggereert dat het\n  // onderwerp nooit langskwam.\n  let terSprake = null;\n  if (!punten.length) {\n    terSprake = (sectie.trefwoorden || []).find((w) =>\n      transcriptTekst.includes(String(w).toLowerCase())\n    ) || null;\n  }\n\n  return {\n    kop: sectie.kop,\n    punten,\n    niet_besproken: punten.length === 0,\n    ter_sprake: terSprake,\n  };\n});\n\n// Wat nergens op paste gaat naar het laatste kopje van het sjabloon, met de\n// oorspronkelijke kop ervoor zodat er niets zoekraakt.\nconst rest = [];\nfor (const over of nogTeVerdelen) {\n  for (const punt of over.punten) {\n    rest.push(over.kop ? `${over.kop}: ${punt}` : punt);\n  }\n}\nif (rest.length) {\n  const laatste = geordend[geordend.length - 1];\n  laatste.punten.push(...rest);\n  laatste.niet_besproken = false;\n}\n\nverslag.onderwerpen = geordend;\n\nreturn [{\n  json: {\n    ...invoer,\n    verslag,\n    // Welke kopjes langs de nacontrole moeten: leeg-maar-wel-ter-sprake, plus de\n    // kopjes die in het sjabloon als `altijd_nacontrole` staan. Dat laatste is\n    // er voor \"Gewenste wijzigingen\": daar ging de brede prompt structureel de\n    // mist in door een besproken-maar-afgewezen optie als wijziging te noteren.\n    nacontrole_koppen: geordend\n      .filter((o) => {\n        const sec = sjabloon.secties.find((s) => s.kop === o.kop) || {};\n        if (sec.altijd_nacontrole) return true;\n        return !(o.punten || []).length && o.ter_sprake;\n      })\n      .map((o) => o.kop),\n    sjabloon_toegepast: sjabloon.soort,\n    sjabloon_secties: Object.fromEntries(\n      sjabloon.secties.map((sec) => [\n        sec.kop,\n        { aanwijzing: sec.aanwijzing || '', trefwoorden: sec.trefwoorden || [] },\n      ])\n    ),\n    secties_totaal: geordend.length,\n    secties_besproken: geordend.filter((s) => !s.niet_besproken).length,\n    secties_ondergebracht_bij_overig: rest.length,\n  },\n}];"
+      },
+      "id": "d1e2f3a4-0032-4f00-bbbb-be5f0e000032",
+      "name": "Orden Secties",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2920,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d1e2f3a4-cond-nacontrole",
+              "leftValue": "={{ ($json.nacontrole_koppen || []).length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d1e2f3a4-0037-4f00-bbbb-be5f0e000037",
+      "name": "Nacontrole nodig?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Bouwt één gerichte vraag per kopje dat Orden Secties heeft aangewezen.\n//\n// Twee soorten: kopjes die leeg bleven terwijl hun trefwoord wél viel, en\n// kopjes die in het sjabloon als `altijd_nacontrole` staan omdat de brede prompt\n// ze structureel verkeerd invult. Alleen de fragmenten rond het trefwoord gaan\n// mee, niet het hele transcript: dat houdt de prompt klein en de aandacht op de\n// juiste plek.\nconst VENSTER = 700;\nconst MAX_FRAGMENTEN = 3;\n\nconst invoer = $json || {};\nconst bron = $('Extract Transcript').first()?.json || {};\nconst transcript = String(bron.transcript || '');\nconst laag = transcript.toLowerCase();\n\nconst meta = invoer.sjabloon_secties || {};\nconst koppen = invoer.nacontrole_koppen || [];\nconst perKop = Object.fromEntries(\n  (invoer.verslag?.onderwerpen || []).map((o) => [o.kop, o])\n);\n\nfunction fragmenten(trefwoorden) {\n  const stukken = [];\n  for (const woord of trefwoorden || []) {\n    const w = String(woord).toLowerCase();\n    let vanaf = 0;\n    while (stukken.length < MAX_FRAGMENTEN) {\n      const i = laag.indexOf(w, vanaf);\n      if (i === -1) break;\n      stukken.push(transcript.slice(Math.max(0, i - VENSTER), i + VENSTER).trim());\n      vanaf = i + w.length;\n    }\n    if (stukken.length >= MAX_FRAGMENTEN) break;\n  }\n  return stukken;\n}\n\nreturn koppen.map((kop) => {\n  const sec = meta[kop] || {};\n  const trefwoorden = sec.trefwoorden && sec.trefwoorden.length\n    ? sec.trefwoorden\n    : [perKop[kop]?.ter_sprake].filter(Boolean);\n  const stukken = fragmenten(trefwoorden);\n  const vraag = sec.vraag || `Wat is er in deze bespreking gezegd over: ${kop}?`;\n\n  return {\n    json: {\n      nacontroleKop: kop,\n      chatInput: `Hieronder staan fragmenten uit een transcript van een notariële bespreking.\n\nVRAAG\n${vraag}\n${sec.vraag ? '' : (sec.aanwijzing ? `Daaronder valt: ${sec.aanwijzing}` : '')}\n\nREGELS\n- Antwoord alleen op basis van de fragmenten. Verzin niets.\n- Gaat het onderwerp in deze fragmenten ergens anders over, geef dan een lege lijst.\n- Hooguit drie korte zinnen.\n\nGeef alleen geldige JSON terug:\n{\"punten\": [\"korte zin\"]}\n\nFRAGMENTEN\n${stukken.join('\\n\\n[...]\\n\\n')}`,\n    },\n  };\n});"
+      },
+      "id": "d1e2f3a4-0038-4f00-bbbb-be5f0e000038",
+      "name": "Split Nacontrole",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2740,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "d1e2f3a4-0039-4f00-bbbb-be5f0e000039",
+      "name": "Loop Nacontrole",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2920,
+        60
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d1e2f3a4-0040-4f00-bbbb-be5f0e000040",
+      "name": "Nacontrole LLM Chain",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        3100,
+        240
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": "qwen2.5:7b",
+        "options": {
+          "temperature": 0,
+          "format": "json",
+          "numCtx": 8192,
+          "numPredict": 512,
+          "keepAlive": "30m"
+        }
+      },
+      "id": "d1e2f3a4-0041-4f00-bbbb-be5f0e000041",
+      "name": "Nacontrole Ollama Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        3100,
+        420
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "xHuYe0MDGOs9IpBW",
+          "name": "Local Ollama service"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Teken van leven per nagecontroleerd kopje.\nconst fs = require('fs');\nconst JOB_PAD = `/data/shared/jobs/${$('Prepare Audio').first().json.jobId}.json`;\n\nfunction werkJobBij(velden) {\n  let job = {};\n  try {\n    job = JSON.parse(fs.readFileSync(JOB_PAD, 'utf8'));\n  } catch (_) {\n    // Jobbestand weg (handmatig opgeruimd?): dan schrijven we het opnieuw aan.\n  }\n  const nieuw = { ...job, ...velden, bijgewerkt_op: new Date().toISOString() };\n  fs.writeFileSync(JOB_PAD, JSON.stringify(nieuw), 'utf8');\n  return nieuw;\n}\n\nconst totaal = $('Split Nacontrole').all().length;\nwerkJobBij({\n  status: 'nacontrole',\n  fase: 2,\n  nacontrole_voortgang: `${$runIndex + 1}/${totaal}`,\n});\n\nreturn $input.all();"
+      },
+      "id": "d1e2f3a4-0042-4f00-bbbb-be5f0e000042",
+      "name": "Nacontrole Hartslag",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3280,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vouwt de antwoorden van de nacontrole terug in het verslag.\nconst basis = $('Orden Secties').first()?.json || {};\nconst verslag = { ...(basis.verslag || {}) };\nconst koppen = $('Split Nacontrole').all().map((i) => i.json.nacontroleKop);\n\nfunction haalObject(j) {\n  if (!j || typeof j !== 'object') return null;\n  for (const k of ['text', 'output', 'answer', 'response']) {\n    if (typeof j[k] === 'string' && j[k]) {\n      try {\n        const t = j[k].replace(/```(?:json)?/gi, '').trim();\n        return JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1));\n      } catch (_) {\n        return null;\n      }\n    }\n  }\n  const kopie = { ...j };\n  delete kopie.pairedItem;\n  return Object.keys(kopie).length ? kopie : null;\n}\n\n// Het model antwoordt soms óver de vraag in plaats van erop: \"bevindt zich niet\n// in de gegeven fragmenten\", of het herhaalt de kop en zegt dat het onderwerp\n// niet is besproken. Dat is geen inhoud; dan blijft het kopje beter gemarkeerd\n// als \"kwam ter sprake\" dan dat er een schijnantwoord in het verslag staat.\nconst GEEN_ANTWOORD = /(fragment|niet in de gegeven|geen informatie|komt niet voor|wordt niet genoemd|niet vermeld|niet besproken|geen (van de )?punten|onbekend)/i;\n\nconst gevonden = {};\n$input.all().forEach((item, i) => {\n  if (item.json && item.json.error) return;\n  const kop = koppen[i];\n  const obj = haalObject(item.json);\n  const punten = (obj && Array.isArray(obj.punten) ? obj.punten : [])\n    .map((x) => String(x).trim())\n    .filter((x) => x.length > 8)\n    .filter((x) => !GEEN_ANTWOORD.test(x))\n    // Een punt dat alleen de kop herhaalt zegt niets.\n    .filter((x) => x.toLowerCase().replace(/[^a-z ]/g, '').trim() !== String(kop || '').toLowerCase());\n  if (punten.length && kop) gevonden[kop] = punten;\n});\n\nverslag.onderwerpen = (verslag.onderwerpen || []).map((o) => {\n  const extra = gevonden[o.kop];\n  if (!extra) return o;\n  return { ...o, punten: extra, niet_besproken: false, ter_sprake: null, uit_nacontrole: true };\n});\n\nreturn [{\n  json: {\n    ...basis,\n    verslag,\n    nacontrole_gevraagd: koppen.length,\n    nacontrole_gevuld: Object.keys(gevonden).length,\n  },\n}];"
+      },
+      "id": "d1e2f3a4-0043-4f00-bbbb-be5f0e000043",
+      "name": "Merge Nacontrole",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3460,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Kern van de getalcontrole, los getest voordat hij de workflow in gaat.\n//\n// Doel: elk getal dat in het verslag staat moet terug te vinden zijn in het\n// transcript. Lastig punt is dat Whisper getallen nu eens als cijfer schrijft\n// (\"60%\", \"2008\") en dan weer voluit (\"vierhonderdvijftigduizend\", \"twintig\n// procent\"). Daarom wordt van elk getal ook de Nederlandse woordvorm gemaakt en\n// dáárop gezocht.\n\nconst EENHEDEN = [\n  'nul', 'een', 'twee', 'drie', 'vier', 'vijf', 'zes', 'zeven', 'acht', 'negen',\n  'tien', 'elf', 'twaalf', 'dertien', 'veertien', 'vijftien', 'zestien',\n  'zeventien', 'achttien', 'negentien',\n];\nconst TIENTALLEN = [\n  '', '', 'twintig', 'dertig', 'veertig', 'vijftig', 'zestig', 'zeventig',\n  'tachtig', 'negentig',\n];\n\nfunction onder100(n) {\n  if (n < 20) return EENHEDEN[n];\n  const t = Math.floor(n / 10);\n  const e = n % 10;\n  if (!e) return TIENTALLEN[t];\n  // Nederlands zet de eenheid vóór het tiental: 45 = vijfenveertig.\n  const koppel = EENHEDEN[e].endsWith('e') ? 'ën' : 'en';\n  return `${EENHEDEN[e]}${koppel}${TIENTALLEN[t]}`;\n}\n\nfunction onder1000(n) {\n  if (n < 100) return onder100(n);\n  const h = Math.floor(n / 100);\n  const rest = n % 100;\n  const kop = h === 1 ? 'honderd' : `${EENHEDEN[h]}honderd`;\n  return rest ? `${kop}${onder100(rest)}` : kop;\n}\n\n/** Nederlandse woordvorm van een geheel getal, of null buiten bereik. */\nfunction inWoorden(n) {\n  if (!Number.isInteger(n) || n < 0 || n > 999999999) return null;\n  if (n < 1000) return onder1000(n);\n  if (n < 1000000) {\n    const d = Math.floor(n / 1000);\n    const rest = n % 1000;\n    const kop = d === 1 ? 'duizend' : `${onder1000(d)}duizend`;\n    return rest ? `${kop}${onder1000(rest)}` : kop;\n  }\n  const m = Math.floor(n / 1000000);\n  const rest = n % 1000000;\n  const kop = m === 1 ? 'een miljoen' : `${onder1000(m)} miljoen`;\n  return rest ? `${kop} ${inWoorden(rest)}` : kop;\n}\n\n/** Alle schrijfwijzen waarop dit getal in een transcript kan staan. */\nfunction varianten(n, ruw) {\n  const uit = new Set();\n  if (ruw) uit.add(String(ruw).toLowerCase());\n  uit.add(String(n));\n  // Duizendtallen met punt of spatie, zoals Whisper ze soms zet.\n  if (n >= 1000) {\n    uit.add(n.toLocaleString('nl-NL'));\n    uit.add(String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ' '));\n  }\n  const woorden = inWoorden(n);\n  if (woorden) {\n    uit.add(woorden);\n    // Whisper schrijft samenstellingen vaak los: \"tweeduizend acht\".\n    uit.add(woorden.replace(/duizend/g, 'duizend '));\n    uit.add(woorden.replace(/honderd/g, 'honderd '));\n  }\n  return [...uit].map((v) => v.trim()).filter(Boolean);\n}\n\n/**\n * Zoekt getallen in een tekst. Levert per vondst het ruwe fragment en de\n * numerieke waarde. Jaartallen en losse kleine getallen tellen mee; die kunnen\n * net zo goed verzonnen zijn.\n */\nfunction vindGetallen(tekst) {\n  const gevonden = [];\n  const rx = /(\\d{1,3}(?:[.\\s]\\d{3})+|\\d+)(?:[,.](\\d+))?\\s*(%|procent|euro)?/gi;\n  let m;\n  while ((m = rx.exec(String(tekst || ''))) !== null) {\n    const heel = m[1].replace(/[.\\s]/g, '');\n    const waarde = parseInt(heel, 10);\n    if (!Number.isFinite(waarde)) continue;\n    gevonden.push({ ruw: m[0].trim(), heelGetal: waarde, eenheid: (m[3] || '').toLowerCase() });\n  }\n  return gevonden;\n}\n\nfunction ontsnap(tekst) {\n  return String(tekst).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');\n}\n\n/**\n * True als het getal ergens in het transcript terug te vinden is.\n *\n * Op woordgrenzen en niet als losse substring: anders gold \"100\" als gedekt\n * omdat \"honderd\" toevallig in \"zeshonderd\" zit, en \"18\" omdat het in \"2018\"\n * staat. Zo'n valse zekerheid maakt de hele controle waardeloos.\n */\nfunction staatInTranscript(getal, transcriptLaag) {\n  return varianten(getal.heelGetal, String(getal.heelGetal)).some((v) => {\n    const kaal = v.toLowerCase().trim();\n    if (!kaal) return false;\n    const alleenCijfers = /^[\\d.,\\s]+$/.test(kaal);\n    // Een punt of komma direct ná het getal is meestal leesteken (\"in 2008.\"),\n    // dus die mag; alleen een aangrenzend cijfer betekent dat we in een gróter\n    // getal zitten (201 in 2018, of een decimaal deel).\n    const patroon = alleenCijfers\n      ? new RegExp(`(?<!\\\\d)(?<!\\\\d[.,])${ontsnap(kaal)}(?!\\\\d)(?![.,]\\\\d)`)\n      : new RegExp(`\\\\b${ontsnap(kaal)}\\\\b`);\n    return patroon.test(transcriptLaag);\n  });\n}\n\n// ---------------------------------------------------------------------------\n// Elk getal in het verslag moet terug te vinden zijn in het transcript. Zo niet,\n// dan komt er een markering achter. Reden: van alle fouten die dit model maakt,\n// is een verkeerd bedrag de gevaarlijkste — een verkeerd geplaatst kopje ziet de\n// behandelaar zo, een plausibel ogend bedrag niet.\n//\n// Wat dit wél vangt: verzonnen en verrekende getallen (120.000 + 60.000 werd\n// \"216.000\"). Wat het níét vangt: een getal dat wél in het transcript staat maar\n// verkeerd is begrepen — \"95, 96\" (bouwjaar) dat \"95% van de woning\" wordt.\nconst basis = $json || {};\nconst verslag = { ...(basis.verslag || {}) };\nconst transcriptLaag = String(\n  ($('Extract Transcript').first()?.json || {}).transcript || ''\n).toLowerCase();\n\nlet gemarkeerd = 0;\n\nfunction controleer(tekst) {\n  const t = String(tekst || '');\n  if (!t) return t;\n  const onvindbaar = vindGetallen(t)\n    .filter((g) => !staatInTranscript(g, transcriptLaag))\n    .map((g) => g.ruw);\n  if (!onvindbaar.length) return t;\n  gemarkeerd += onvindbaar.length;\n  const uniek = [...new Set(onvindbaar)];\n  return `${t}  [niet in transcript: ${uniek.join(', ')}]`;\n}\n\nfunction controleerLijst(lijst) {\n  return (Array.isArray(lijst) ? lijst : []).map((x) =>\n    typeof x === 'string' ? controleer(x) : x\n  );\n}\n\nverslag.samenvatting = controleer(verslag.samenvatting);\nverslag.afspraken = controleerLijst(verslag.afspraken);\nverslag.open_vragen = controleerLijst(verslag.open_vragen);\nverslag.onderwerpen = (verslag.onderwerpen || []).map((o) => ({\n  ...o,\n  punten: controleerLijst(o.punten),\n}));\n\nreturn [{ json: { ...basis, verslag, getallen_gemarkeerd: gemarkeerd } }];"
+      },
+      "id": "d1e2f3a4-0044-4f00-bbbb-be5f0e000044",
+      "name": "Controleer Getallen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3280,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Args naar tijdelijk JSON-bestand voor genereer_besprekingsverslag.py. Zelfde\n// patroon als de analyse-flow: het transcript bevat cliëntgegevens en gaat\n// daarom niet via de commandline. Python verwijdert het bestand na inlezen.\nconst fs = require('fs');\nconst JOB_PAD = `/data/shared/jobs/${$('Prepare Audio').first().json.jobId}.json`;\n\nfunction werkJobBij(velden) {\n  let job = {};\n  try {\n    job = JSON.parse(fs.readFileSync(JOB_PAD, 'utf8'));\n  } catch (_) {\n    // Jobbestand weg (handmatig opgeruimd?): dan schrijven we het opnieuw aan.\n  }\n  const nieuw = { ...job, ...velden, bijgewerkt_op: new Date().toISOString() };\n  fs.writeFileSync(JOB_PAD, JSON.stringify(nieuw), 'utf8');\n  return nieuw;\n}\n\nwerkJobBij({ status: 'document', fase: 3 });\n\nconst execId = String($execution.id || 'single').replace(/[^0-9A-Za-z_-]/g, '_').slice(0, 32);\nconst argsFile = `/tmp/n8n_args_bespreking_${execId}_${Date.now()}.json`;\n\nconst meta = $('Prepare Audio').first()?.json || {};\nconst j = $json || {};\n\nconst payload = {\n  verslag: j.verslag || {},\n  referentie: String(meta.referentie || 'onbekend'),\n  transcript: String(j.transcript || ''),\n  metadata: {\n    dossier: meta.dossier || '',\n    datum: meta.datum || '',\n    duur_seconden: meta.duur_seconden || 0,\n  },\n};\n\nfs.writeFileSync(argsFile, JSON.stringify(payload), 'utf8');\nreturn [{ json: { ...j, argsFile } }];"
+      },
+      "id": "d1e2f3a4-0008-4f00-bbbb-be5f0e000008",
+      "name": "Write Verslag Args",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3640,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=python3 /data/shared/genereer_besprekingsverslag.py --args-file '{{ $json.argsFile }}'"
+      },
+      "id": "d1e2f3a4-0009-4f00-bbbb-be5f0e000009",
+      "name": "Generate Verslag DOCX",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        3820,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Schrijft het eindresultaat in het jobbestand; de webapp haalt het bij de\n// volgende poll op. De HTTP-respons is al veel eerder verstuurd (job_id), dus\n// hier gaat niets meer over de lijn.\nconst fs = require('fs');\nconst JOB_PAD = `/data/shared/jobs/${$('Prepare Audio').first().json.jobId}.json`;\n\nfunction werkJobBij(velden) {\n  let job = {};\n  try {\n    job = JSON.parse(fs.readFileSync(JOB_PAD, 'utf8'));\n  } catch (_) {\n    // Jobbestand weg (handmatig opgeruimd?): dan schrijven we het opnieuw aan.\n  }\n  const nieuw = { ...job, ...velden, bijgewerkt_op: new Date().toISOString() };\n  fs.writeFileSync(JOB_PAD, JSON.stringify(nieuw), 'utf8');\n  return nieuw;\n}\n\nconst cmd = $('Generate Verslag DOCX').first()?.json || {};\nconst stdout = String(cmd.stdout || '');\nconst stderr = String(cmd.stderr || '');\nconst match = stdout.match(/SUCCESS:\\s*(.+)/);\nconst filePath = match ? match[1].trim() : '';\nconst filename = filePath ? filePath.split('/').pop() : '';\n\n// Let op: pak hier altijd de láátste bewerking van het verslag. Write Verslag\n// Args leest `$json` en krijgt die vanzelf, maar deze node haalt zijn data via\n// nodenamen op — vergeet je die bij te werken als er een stap bij komt, dan\n// bevat het DOCX de nieuwe versie en de webapp de oude. Dat is hier al twee keer\n// misgegaan bij het toevoegen van een nabewerking.\n// Uit Write Verslag Args: die node draait altijd en als laatste, welke tak er\n// ook is gevolgd. Eerder stond hier een keten van nodenamen, en dat ging drie\n// keer mis — het DOCX kreeg de nieuwste versie en de webapp een oudere.\nconst data = $('Write Verslag Args').first()?.json || {};\nconst meta = $('Prepare Audio').first()?.json || {};\n\nconst waarschuwingen = [];\nif (data.parse_waarschuwing) waarschuwingen.push(data.parse_waarschuwing);\nif (data.blokken_mislukt) {\n  waarschuwingen.push(\n    `${data.blokken_mislukt} van de ${data.blok_aantal} delen van de bespreking konden niet worden samengevat en zijn niet in het verslag verwerkt. Het volledige transcript staat wel in de bijlage.`\n  );\n}\nif (data.basis_afgekapt) {\n  waarschuwingen.push(\n    'De bespreking was zo lang dat zelfs de deelsamenvattingen niet in één prompt pasten; het laatste stuk is niet meegewogen. Het volledige transcript staat wel in de bijlage.'\n  );\n}\nif (!filePath) {\n  waarschuwingen.push(\n    `Verslag-DOCX niet gegenereerd. stdout=${stdout.slice(0, 200)}; stderr=${stderr.slice(0, 200)}`\n  );\n}\n\nconst resultaat = {\n  success: !!filePath,\n  referentie: meta.referentie || '',\n  dossier: meta.dossier || '',\n  datum: meta.datum || '',\n  duur_seconden: meta.duur_seconden || 0,\n  filename: filename || null,\n  file_path: filePath || null,\n  download_url: filename ? `http://localhost:8080/output/${filename}` : null,\n  verslag: data.verslag || null,\n  transcript: data.transcript || '',\n  blok_aantal: data.blok_aantal || 1,\n  getallen_gemarkeerd: data.getallen_gemarkeerd || 0,\n  sjabloon: data.sjabloon_toegepast\n    ? {\n        soort: data.sjabloon_toegepast,\n        secties_totaal: data.secties_totaal || 0,\n        secties_besproken: data.secties_besproken || 0,\n      }\n    : null,\n  counts: data.counts || null,\n  waarschuwingen,\n};\n\nconst job = werkJobBij({\n  status: filePath ? 'klaar' : 'fout',\n  fase: 4,\n  fout: filePath ? null : waarschuwingen.join(' '),\n  resultaat,\n});\n\nreturn [{ json: job }];"
+      },
+      "id": "d1e2f3a4-0010-4f00-bbbb-be5f0e000010",
+      "name": "Build Bespreking Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2740,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🎙️ ENTRY (job-patroon)\nWebhook `/bespreking` ontvangt één audiobestand (16 kHz mono WAV, client-side geconverteerd) plus `dossier`, `onderwerp`, `deelnemers`, `datum` en `duur_seconden`.\n\n`Prepare Audio` schrijft een jobbestand in `/data/shared/jobs/` en `Respond Job Id` antwoordt **meteen** met het `job_id`. De rest van de workflow loopt daarachter door en werkt de status bij; de webapp pollt `/bespreking-status?job=…`.\n\nJobbestanden bevatten het transcript en worden na 24 uur opgeruimd bij de eerstvolgende bespreking.",
+        "height": 420,
+        "width": 400
+      },
+      "id": "d1e2f3a4-0012-4f00-bbbb-be5f0e000012",
+      "name": "Sticky: entry",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🗣️ TRANSCRIPTIE\n`whisper.cpp` draait **native op de host** (Metal), niet in Docker — containers op macOS krijgen geen GPU. Starten met `./shared/whisper/start-whisper-server.sh`.\n\nSnelheid: ± 8× realtime met large-v3-turbo-q5. Een bespreking van 10 min ≈ 75 s.",
+        "height": 300,
+        "width": 380
+      },
+      "id": "d1e2f3a4-0013-4f00-bbbb-be5f0e000013",
+      "name": "Sticky: whisper",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 📝 VERSLAG (map-reduce)\nPast het transcript in één prompt (< 9.000 tekens, ± een kwartier spreektijd), dan gaat het rechtstreeks naar de verslag-prompt.\n\nIs het langer, dan vat `Blok LLM Chain` **elk blok apart samen** (één LLM-aanroep per blok) en bouwt `Collect Blok Samenvattingen` daar één basistekst van. Zo verdwijnt het tweede uur niet stilzwijgend uit het verslag.\n\nEen blok dat de LLM niet aankan wordt overgeslagen en gemeld in `waarschuwingen`; de rest van de bespreking gaat gewoon door.",
+        "height": 400,
+        "width": 420
+      },
+      "id": "d1e2f3a4-0014-4f00-bbbb-be5f0e000014",
+      "name": "Sticky: verslag",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        560,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bespreking-aanvullen",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d1e2f3a4-0040-4f00-bbbb-be5f0e000040",
+      "name": "Webhook Aanvullen",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        900
+      ],
+      "webhookId": "bespreking-aanvullen-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ---------------------------------------------------------------------------\n// Aanvullen van een besprekingsverslag door de behandelaar.\n//\n// Een kopje uit het sjabloon kan leeg blijven terwijl het onderwerp wél is\n// besproken — het transcript mist het, of het model haalt er niets uit. Hier\n// vult de behandelaar dat alsnog in, waarna het DOCX opnieuw wordt gemaakt.\n//\n// Er komt geen model aan te pas: genereer_besprekingsverslag.py is een zuivere\n// functie van het verslag. De bron blijft het jobbestand op schijf, dus de\n// webapp stuurt alleen het job_id en de aanvullingen mee — het transcript en de\n// rest van het verslag hoeven daarvoor niet opnieuw over de lijn.\n//\n// Verwacht multipart-form-data met één veld 'payload' (JSON-tekst):\n//   { job_id, aanvullingen: { \"<kop>\": [\"punt\", ...] } }\n// ---------------------------------------------------------------------------\n\nconst fs = require('fs');\nconst JOB_DIR = '/data/shared/jobs';\n\n// Een throw in een Code node levert bij responseMode=responseNode een leeg\n// 200-antwoord op; verwachte fouten gaan daarom als data terug.\nfunction mislukt(bericht) {\n  return [{ json: { success: false, error: bericht } }];\n}\n\nconst body = $json.body || $json || {};\nlet payload;\ntry {\n  payload = typeof body.payload === 'string' ? JSON.parse(body.payload) : (body.payload || body);\n} catch (err) {\n  return mislukt(`Kon payload niet lezen als JSON: ${err.message}`);\n}\n\nconst jobId = String(payload.job_id || '').trim();\nif (!/^[0-9A-Za-z_-]{1,120}$/.test(jobId)) {\n  return mislukt(`Ongeldig job_id: '${payload.job_id || ''}'.`);\n}\n\nconst jobPad = `${JOB_DIR}/${jobId}.json`;\nlet job;\ntry {\n  job = JSON.parse(fs.readFileSync(jobPad, 'utf8'));\n} catch (err) {\n  return mislukt(\n    `Kon de bespreking niet meer vinden (${err.code || 'fout'}). Jobbestanden worden na 24 uur ` +\n    `opgeruimd; genereer het verslag opnieuw om het te kunnen aanvullen.`\n  );\n}\n\nconst resultaat = job.resultaat || null;\nconst verslag = resultaat && resultaat.verslag ? resultaat.verslag : null;\nif (!verslag || !Array.isArray(verslag.onderwerpen)) {\n  return mislukt('Deze bespreking heeft nog geen verslag met kopjes om aan te vullen.');\n}\n\n// Aanvullingen normaliseren: per kop een lijst korte regels. Lege regels eruit,\n// zodat een per ongeluk achtergelaten witregel geen leeg opsommingsteken wordt.\nconst ruw = payload.aanvullingen && typeof payload.aanvullingen === 'object'\n  ? payload.aanvullingen\n  : {};\nconst aanvullingen = {};\nfor (const [kop, waarde] of Object.entries(ruw)) {\n  const regels = (Array.isArray(waarde) ? waarde : String(waarde).split('\\n'))\n    .map((r) => String(r).trim())\n    .filter(Boolean)\n    .slice(0, 20);\n  if (regels.length) aanvullingen[String(kop)] = regels;\n}\nif (!Object.keys(aanvullingen).length) {\n  return mislukt('Geen aanvullingen meegestuurd.');\n}\n\n// Koppen matchen op de exacte tekst uit het verslag; de webapp stuurt terug wat\n// ze getoond heeft. Een kop die niet voorkomt is een fout aan onze kant en\n// verdient een melding, geen stilzwijgend genegeerde aanvulling.\nconst bestaandeKoppen = new Set(\n  verslag.onderwerpen\n    .filter((o) => o && typeof o === 'object')\n    .map((o) => String(o.kop || ''))\n);\nconst onbekend = Object.keys(aanvullingen).filter((k) => !bestaandeKoppen.has(k));\nif (onbekend.length) {\n  return mislukt(`Onbekende kop(pen) in dit verslag: ${onbekend.join(', ')}.`);\n}\n\nlet bijgewerkt = 0;\nconst onderwerpen = verslag.onderwerpen.map((o) => {\n  if (!o || typeof o !== 'object') return o;\n  const regels = aanvullingen[String(o.kop || '')];\n  if (!regels) return o;\n  bijgewerkt += 1;\n  return {\n    ...o,\n    // Bestaande aanvullingen worden vervangen, niet aangevuld: de webapp toont\n    // wat er staat en stuurt het geheel terug, dus dit is idempotent en de\n    // gebruiker kan een eerdere aanvulling ook weer corrigeren.\n    aangevuld: regels,\n    niet_besproken: false,\n    // 'Kwam ter sprake, geen uitkomst vastgelegd' klopt niet meer zodra de\n    // behandelaar de uitkomst zelf heeft opgeschreven.\n    ter_sprake: null,\n  };\n});\n\nconst nieuwVerslag = { ...verslag, onderwerpen };\n\nconst execId = String($execution.id || 'single').replace(/[^0-9A-Za-z_-]/g, '_').slice(0, 32);\nconst argsFile = `/tmp/n8n_args_aanvulling_${execId}_${Date.now()}.json`;\nfs.writeFileSync(\n  argsFile,\n  JSON.stringify({\n    verslag: nieuwVerslag,\n    referentie: String(resultaat.referentie || job.referentie || 'onbekend'),\n    transcript: String(resultaat.transcript || ''),\n    metadata: {\n      dossier: resultaat.dossier || job.dossier || '',\n      datum: resultaat.datum || job.datum || '',\n      duur_seconden: resultaat.duur_seconden || job.duur_seconden || 0,\n    },\n  }),\n  'utf8'\n);\n\nreturn [{\n  json: {\n    jobId,\n    jobPad,\n    argsFile,\n    verslag: nieuwVerslag,\n    koppen_bijgewerkt: bijgewerkt,\n  },\n}];"
+      },
+      "id": "d1e2f3a4-0041-4f00-bbbb-be5f0e000041",
+      "name": "Prepare Aanvulling",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        60,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d1e2f3a4-cond-aanvulling-geldig",
+              "leftValue": "={{ $json.argsFile }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d1e2f3a4-0042-4f00-bbbb-be5f0e000042",
+      "name": "Aanvulling geldig?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        320,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=python3 /data/shared/genereer_besprekingsverslag.py --args-file '{{ $json.argsFile }}'"
+      },
+      "id": "d1e2f3a4-0043-4f00-bbbb-be5f0e000043",
+      "name": "Generate Aanvulling DOCX",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        580,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Schrijft het bijgewerkte verslag terug in het jobbestand en antwoordt de\n// webapp. Het DOCX heeft dezelfde bestandsnaam als eerst (die is afgeleid van de\n// referentie), dus de bestaande downloadlink blijft kloppen — maar we sturen hem\n// voor de zekerheid mee terug.\nconst fs = require('fs');\n\nconst voorbereid = $('Prepare Aanvulling').first()?.json || {};\nif (voorbereid.success === false) {\n  return [{ json: voorbereid }];\n}\n\nconst cmd = $json || {};\nconst stdout = String(cmd.stdout || '');\nconst stderr = String(cmd.stderr || '');\nconst match = stdout.match(/SUCCESS:\\s*(.+)/);\nconst filePath = match ? match[1].trim() : '';\nconst filename = filePath ? filePath.split('/').pop() : '';\n\nif (!filePath) {\n  return [{\n    json: {\n      success: false,\n      error:\n        `Verslag-DOCX niet opnieuw gegenereerd. stdout=${stdout.slice(0, 200)}; ` +\n        `stderr=${stderr.slice(0, 200)}`,\n    },\n  }];\n}\n\nlet job = {};\ntry {\n  job = JSON.parse(fs.readFileSync(voorbereid.jobPad, 'utf8'));\n} catch (_) {\n  // Jobbestand intussen opgeruimd: het DOCX staat er wel, dus dat melden we\n  // gewoon. Alleen de volgende poll van de webapp vindt dan niets meer.\n}\n\nconst resultaat = {\n  ...(job.resultaat || {}),\n  verslag: voorbereid.verslag,\n  filename,\n  file_path: filePath,\n  download_url: `http://localhost:8080/output/${filename}`,\n  aangevuld_op: new Date().toISOString(),\n};\n\ntry {\n  fs.writeFileSync(\n    voorbereid.jobPad,\n    JSON.stringify({ ...job, resultaat, bijgewerkt_op: new Date().toISOString() }),\n    'utf8'\n  );\n} catch (_) {\n  // Zie boven: niet kunnen bijwerken maakt het verslag niet ongeldig.\n}\n\nreturn [{\n  json: {\n    success: true,\n    job_id: voorbereid.jobId,\n    koppen_bijgewerkt: voorbereid.koppen_bijgewerkt,\n    filename,\n    download_url: resultaat.download_url,\n    verslag: voorbereid.verslag,\n  },\n}];"
+      },
+      "id": "d1e2f3a4-0044-4f00-bbbb-be5f0e000044",
+      "name": "Finish Aanvulling",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "d1e2f3a4-0045-4f00-bbbb-be5f0e000045",
+      "name": "Respond Aanvulling",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        1100,
+        900
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Audio": {
+      "main": [
+        [
+          {
+            "node": "Respond Job Id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Job Id": {
+      "main": [
+        [
+          {
+            "node": "Audio of transcript?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audio of transcript?": {
+      "main": [
+        [
+          {
+            "node": "Whisper Transcribe",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Transcript Passthrough",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcript Passthrough": {
+      "main": [
+        [
+          {
+            "node": "Extract Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Whisper Transcribe": {
+      "main": [
+        [
+          {
+            "node": "Extract Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Transcript": {
+      "main": [
+        [
+          {
+            "node": "Lange bespreking?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lange bespreking?": {
+      "main": [
+        [
+          {
+            "node": "Split Blokken",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Transcript Direct",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Blokken": {
+      "main": [
+        [
+          {
+            "node": "Loop Blokken",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Blokken": {
+      "main": [
+        [
+          {
+            "node": "Collect Blok Samenvattingen",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Blok LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Blok Hartslag": {
+      "main": [
+        [
+          {
+            "node": "Loop Blokken",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Blok Ollama Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Blok LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Blok LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Blok Hartslag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Blok Samenvattingen": {
+      "main": [
+        [
+          {
+            "node": "Build Verslag Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcript Direct": {
+      "main": [
+        [
+          {
+            "node": "Build Verslag Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Verslag Prompt": {
+      "main": [
+        [
+          {
+            "node": "Verslag LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verslag Ollama Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Verslag LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verslag LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Parse Verslag JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Verslag JSON": {
+      "main": [
+        [
+          {
+            "node": "Orden Secties",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Orden Secties": {
+      "main": [
+        [
+          {
+            "node": "Nacontrole nodig?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nacontrole nodig?": {
+      "main": [
+        [
+          {
+            "node": "Split Nacontrole",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Controleer Getallen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Nacontrole": {
+      "main": [
+        [
+          {
+            "node": "Loop Nacontrole",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Nacontrole": {
+      "main": [
+        [
+          {
+            "node": "Merge Nacontrole",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nacontrole LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nacontrole Ollama Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Nacontrole LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nacontrole LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Nacontrole Hartslag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nacontrole Hartslag": {
+      "main": [
+        [
+          {
+            "node": "Loop Nacontrole",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Nacontrole": {
+      "main": [
+        [
+          {
+            "node": "Controleer Getallen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Controleer Getallen": {
+      "main": [
+        [
+          {
+            "node": "Write Verslag Args",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Verslag Args": {
+      "main": [
+        [
+          {
+            "node": "Generate Verslag DOCX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Verslag DOCX": {
+      "main": [
+        [
+          {
+            "node": "Build Bespreking Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Aanvullen": {
+      "main": [
+        [
+          {
+            "node": "Prepare Aanvulling",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Aanvulling": {
+      "main": [
+        [
+          {
+            "node": "Aanvulling geldig?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aanvulling geldig?": {
+      "main": [
+        [
+          {
+            "node": "Generate Aanvulling DOCX",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Aanvulling",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Aanvulling DOCX": {
+      "main": [
+        [
+          {
+            "node": "Finish Aanvulling",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finish Aanvulling": {
+      "main": [
+        [
+          {
+            "node": "Respond Aanvulling",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "foutafhandeling"
+  },
+  "meta": {
+    "instanceId": "self-hosted-ai-starter-kit"
+  },
+  "id": "bespreking-verslag"
+}

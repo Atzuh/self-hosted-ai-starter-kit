@@ -1,0 +1,253 @@
+{
+  "soort": "testament",
+  "naam": "Testament",
+  "bron": "Bespreekformulier testamenten versie 3-1-2025.docx",
+  "herken_op": [
+    "testament",
+    "testamenten",
+    "erfenis",
+    "nalatenschap",
+    "uiterste wil"
+  ],
+  "toelichting": "Vaste volgorde voor het besprekingsverslag van een testamentbespreking. De volgorde volgt het bespreekformulier; 'Familiesituatie' en 'Vermogenssituatie' staan er op verzoek vooraan. 'Aanleiding en status' en 'Gewenste wijzigingen' staan er voor besprekingen waarin een bestaand testament wordt doorgenomen; bij een nieuw testament blijven die leeg. De erfstellingen heten hier eerste/tweede/derde in plaats van primair/subsidiair/tertiair, omdat dat de termen zijn die in het gesprek zelf vallen. Kopjes die niet aan bod kwamen blijven staan met de vermelding 'Niet vastgelegd', zodat in één oogopslag zichtbaar is wat nog open staat.",
+  "secties": [
+    {
+      "kop": "Familiesituatie",
+      "aanwijzing": "Burgerlijke staat en het huwelijksregime, met de reden erbij (bijvoorbeeld: algehele gemeenschap van goederen omdat er vóór 2018 is getrouwd zonder huwelijkse voorwaarden). Kinderen en stiefkinderen, kleinkinderen, eerdere relaties. Ook of er op dit moment al een testament is.",
+      "trefwoorden": [
+        "gehuwd",
+        "getrouwd",
+        "huwelijk",
+        "samenlevingscontract",
+        "gemeenschap van goederen",
+        "huwelijkse voorwaarden",
+        "kinderen",
+        "nichtje",
+        "neef",
+        "zus",
+        "broer",
+        "ouders",
+        "kleinkind",
+        "stiefkind",
+        "partner",
+        "geboortedatum"
+      ]
+    },
+    {
+      "kop": "Vermogenssituatie",
+      "aanwijzing": "Uitsluitend het vermogen dat de cliënten hebben: woning en andere registergoederen, hypotheek, spaargeld en beleggingen, onderneming, schulden, eerdere schenkingen. Het huwelijksregime hoort onder Familiesituatie, en rentepercentages op kindsdelen horen bij Opeisingsgronden en rente — niet hier.",
+      "trefwoorden": [
+        "woning",
+        "huis",
+        "hypotheek",
+        "spaargeld",
+        "beleggingen",
+        "vermogen",
+        "onderneming",
+        "schulden",
+        "verzekering",
+        "bezittingen"
+      ]
+    },
+    {
+      "kop": "Aanleiding en status",
+      "aanwijzing": "Is er al een testament of niet? Zo ja: wanneer opgesteld, blijft het in stand of wordt het vervangen. Zo nee: vermeld dat er op dit moment geen testament is. Kort en feitelijk; verder niets.",
+      "trefwoorden": [
+        "bestaand testament",
+        "huidige testament",
+        "bestaande testament",
+        "in stand blijven",
+        "in stand",
+        "doorgenomen",
+        "doornemen",
+        "al een testament",
+        "eerder testament",
+        "reeds een testament",
+        "nog helemaal goed",
+        "passeren nog"
+      ]
+    },
+    {
+      "kop": "Besproken punten",
+      "aanwijzing": "Punten die in dit gesprek zijn doorgenomen en die niet onder een van de andere kopjes vallen. Gaat het om een bestaand testament, dan ook welke wijzigingen de cliënten daarin willen en wat ongewijzigd blijft.",
+      "trefwoorden": [
+        "wijziging",
+        "wijzigingen",
+        "wijzigen",
+        "aanpassen",
+        "aanpassing",
+        "veranderen",
+        "in stand blijven",
+        "aangepast",
+        "besproken",
+        "doorgenomen"
+      ]
+    },
+    {
+      "kop": "Eerste erfstelling",
+      "aanwijzing": "Wie erft in eerste instantie: partner, partner en (stief)kinderen, partner voor 1%, of een andere verdeling.",
+      "trefwoorden": [
+        "erven",
+        "erfgenaam",
+        "erfgenamen",
+        "erfstelling",
+        "nalaten",
+        "erft"
+      ]
+    },
+    {
+      "kop": "Tweede erfstelling",
+      "aanwijzing": "Wie erft als de eerste erfstelling wegvalt: kinderen, stiefkinderen, of een andere aanwijzing.",
+      "trefwoorden": [
+        "langstlevende",
+        "overblijft",
+        "vervolgens",
+        "daarna",
+        "als eerste komt te overlijden"
+      ]
+    },
+    {
+      "kop": "Derde erfstelling",
+      "aanwijzing": "Wie erft als ook de tweede erfstelling wegvalt: familie half/half volgens de wet, de erfgenamen volgens de wet, of anders. Ook de regeling bij gelijktijdig overlijden.",
+      "trefwoorden": [
+        "gelijktijdig",
+        "volgens de wet",
+        "wettelijke verdeling",
+        "wet zegt"
+      ]
+    },
+    {
+      "kop": "Plaatsvervulling en onterving",
+      "aanwijzing": "Voor wie geldt plaatsvervulling wel of niet, en wie wordt onterfd.",
+      "trefwoorden": [
+        "plaatsvervulling",
+        "onterven",
+        "onterfd",
+        "in de plaats"
+      ]
+    },
+    {
+      "kop": "Rechtskeuze",
+      "aanwijzing": "Nederlands recht of een ander rechtsstelsel.",
+      "trefwoorden": [
+        "rechtskeuze",
+        "nederlands recht",
+        "buitenlands recht"
+      ]
+    },
+    {
+      "kop": "Soort testament",
+      "aanwijzing": "Wettelijke verdeling, combinatietestament, flextestament, of partner erfgenaam met legaat aan de kinderen.",
+      "trefwoorden": [
+        "persoonlijk testament",
+        "combinatietestament",
+        "flextestament",
+        "langstlevende testament",
+        "wettelijke verdeling",
+        "soort testament"
+      ]
+    },
+    {
+      "kop": "Opeisingsgronden en rente",
+      "aanwijzing": "Wanneer de vordering van de kinderen opeisbaar is, wilsrechten, en of de vordering renteloos is of een rente draagt.",
+      "trefwoorden": [
+        "opeisbaar",
+        "rente",
+        "vordering",
+        "wilsrecht",
+        "kindsdeel",
+        "kindsdelen"
+      ]
+    },
+    {
+      "kop": "Uitsluitingsclausule",
+      "aanwijzing": "Harde uitsluiting, eventueel met blokkering van consumptieve besteding, of een andere variant.",
+      "trefwoorden": [
+        "uitsluitingsclausule",
+        "uitsluiting",
+        "koude kant",
+        "privévermogen"
+      ]
+    },
+    {
+      "kop": "Dertigdagenclausule",
+      "aanwijzing": "Voor wie de clausule geldt: alle erfgenamen, de partner, de afstammelingen of anders.",
+      "trefwoorden": [
+        "dertig dagen",
+        "30 dagen",
+        "dertigdagen"
+      ]
+    },
+    {
+      "kop": "Tweetrapsmaking",
+      "aanwijzing": "Zuiver, bij echtscheiding of op erfdeel/legaat. Bezwaarde en verwachters, giften, beschikkingsbevoegdheid en verteringsbevoegdheid.",
+      "trefwoorden": [
+        "tweetrap",
+        "bezwaarde",
+        "verwachter",
+        "restant",
+        "wat er over blijft",
+        "wat overblijft",
+        "over blijft",
+        "overblijft",
+        "teruggaat naar",
+        "terug naar mijn kant",
+        "mijn kant van"
+      ]
+    },
+    {
+      "kop": "Voogdij",
+      "aanwijzing": "Primaire, secundaire en tertiaire voogd, en wensen daarbij.",
+      "trefwoorden": [
+        "voogd",
+        "voogdij",
+        "minderjarig"
+      ]
+    },
+    {
+      "kop": "Bewind",
+      "aanwijzing": "Bewindvoerder en opvolger, wie onder bewind staat, tot welke leeftijd of levenslang, gronden en beloning.",
+      "trefwoorden": [
+        "bewind",
+        "bewindvoerder",
+        "afwikkelingsbewind",
+        "mentorschap"
+      ]
+    },
+    {
+      "kop": "Executele",
+      "aanwijzing": "Executeur en opvolger, afwikkelingsbewind, beloning. Ook uitvaartwensen en het verwijderen of behouden van sociale media.",
+      "trefwoorden": [
+        "executeur",
+        "executele",
+        "uitvaart",
+        "afwikkeling"
+      ]
+    },
+    {
+      "kop": "Legaten",
+      "aanwijzing": "Kleinkindlegaat, opvullegaat en afvullegaat, legaat van een geldbedrag, legaat van een registergoed met inbreng en eventuele betalingsregeling.",
+      "trefwoorden": [
+        "legaat",
+        "legaten",
+        "stichting",
+        "stichtingen",
+        "goed doel",
+        "goede doelen",
+        "kleinkindlegaat"
+      ]
+    },
+    {
+      "kop": "Uitsluiting ouderlijk vruchtgenot",
+      "aanwijzing": "Of het ouderlijk vruchtgenot wordt uitgesloten.",
+      "trefwoorden": [
+        "vruchtgenot",
+        "ouderlijk vruchtgenot"
+      ]
+    },
+    {
+      "kop": "Overige aandachtspunten",
+      "aanwijzing": "Wat verder is besproken en niet onder een van bovenstaande kopjes valt: codicil, levenstestament, kosten, planning."
+    }
+  ]
+}

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  Check,
   Download,
   Files,
   Scale,
@@ -14,8 +15,9 @@ import { Label } from "@/components/ui/label";
 import { Stepper } from "@/components/Stepper";
 import type { Step } from "@/components/Stepper";
 import { MultiFileDropZone } from "@/components/MultiFileDropZone";
-import { StatusLog } from "@/components/StatusLog";
-import type { LogEntry, LogKind, StatusState } from "@/components/StatusLog";
+import { GenerationProgress } from "@/components/GenerationProgress";
+import type { ProgressState } from "@/components/GenerationProgress";
+import { AktePreview } from "@/components/AktePreview";
 import { RecentAktes } from "@/components/RecentAktes";
 import { fetchRecentAktes } from "@/lib/recent-aktes";
 import type { RecentAkte } from "@/components/RecentAktes";
@@ -25,13 +27,78 @@ import { cn } from "@/lib/utils";
 import { dedupeFilesForUpload } from "@/lib/dedupe-upload-files";
 import { selectFiles } from "@/lib/file-groups";
 import { usePersistedFiles } from "@/hooks/use-persisted-files";
+import { jobIdVanAntwoord, wachtOpJob } from "@/lib/job-status";
 
 export type GenerationMode = "akte" | "analyse";
+
+/**
+ * Context die de gebruiker aan de analyse meegeeft: om wat voor zaak gaat het.
+ * De analyse was standaard op een hypotheekdossier gericht; met deze keuze
+ * stuurt de gebruiker de specialisten en de eindanalyse naar de juiste
+ * transactie. De waarde gaat als formulierveld mee met de upload en komt in
+ * n8n terecht bij registry.zaaksoort_context.
+ */
+export type Zaaksoort = "hypotheek" | "levering";
+
+/**
+ * Vaste volgorde; die bepaalt ook de canonieke sleutel die naar n8n gaat
+ * ("hypotheek+levering"), waar registry.zaaksoort_context aan hangt.
+ */
+const ZAAKSOORT_VOLGORDE: Zaaksoort[] = ["hypotheek", "levering"];
+
+/** Canonieke sleutel: gesorteerd en met '+' aan elkaar. */
+function zaaksoortSleutel(gekozen: Zaaksoort[]): string {
+  return ZAAKSOORT_VOLGORDE.filter((z) => gekozen.includes(z)).join("+");
+}
+
+export function zaaksoortLabel(sleutel: string): string {
+  const delen = sleutel.split("+");
+  if (delen.length > 1) return "Levering en hypotheek";
+  if (sleutel === "levering") return "Levering";
+  return "Hypotheek";
+}
+
+const ZAAKSOORT_OPTIES: {
+  waarde: Zaaksoort;
+  label: string;
+  omschrijving: string;
+}[] = [
+  {
+    waarde: "hypotheek",
+    label: "Hypotheek",
+    omschrijving:
+      "Vestiging van een recht van hypotheek: passeeropdracht van de bank, hypotheekgever en onderpand.",
+  },
+  {
+    waarde: "levering",
+    label: "Levering",
+    omschrijving:
+      "Eigendomsoverdracht op grond van een koopovereenkomst: verkoper, koper, en wat schoon over moet.",
+  },
+];
 
 /** Akte en analyse zijn losse n8n-workflows met elk een eigen webhook. */
 const DEFAULT_WEBHOOKS: Record<GenerationMode, string> = {
   akte: "http://localhost:5678/webhook/hypotheekakte",
   analyse: "http://localhost:5678/webhook/juridische-analyse",
+};
+
+/**
+ * Statussen uit het jobbestand, vertaald naar de fase-index in
+ * `progressPhases`. Beide workflows draaien als achtergrondjob, met per flow
+ * eigen statusnamen die op dezelfde drie fase-labels uitkomen.
+ */
+const STATUS_FASE: Record<string, number> = {
+  // analyse
+  "documenten lezen": 0,
+  analyseren: 1,
+  document: 2,
+  // akte
+  "documenten omzetten": 0,
+  "gegevens extraheren": 1,
+  "akte opmaken": 2,
+  // beide
+  klaar: 2,
 };
 
 const MODE_META: Record<
@@ -70,25 +137,24 @@ const MODE_META: Record<
   },
 };
 
-function formatTime(date: Date) {
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(
-    date.getSeconds()
-  )}`;
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 interface GenerationResult {
   mode: GenerationMode;
   downloadUrl?: string;
+  previewUrl?: string;
   filename?: string;
   bankDisplayName?: string;
   zaaknummer?: string;
   klantSamenvatting?: string;
   analyse?: JuridischeAnalyseData;
+  /** Zaaksoort-sleutel waarop de analyse is gericht (alleen analyse-flow). */
+  zaaksoort?: string;
+  /** Deterministisch oordeel over de beschikkingsbevoegdheid (alleen akte-flow). */
+  bevoegdheid?: BeschikkingsbevoegdheidData;
+}
+
+/** Zelfde vorm als de juridische analyse, plus een expliciete status. */
+interface BeschikkingsbevoegdheidData extends JuridischeAnalyseData {
+  status?: "rond" | "onbekend" | "niet_rond";
 }
 
 interface AkteGeneratorProps {
@@ -110,6 +176,12 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
     new Set()
   );
   const [webhookUrls, setWebhookUrls] = useState(DEFAULT_WEBHOOKS);
+  /**
+   * Alleen van belang voor de analyse-flow; de akte-flow kent maar één
+   * zaaksoort. Meerdere tegelijk kan: een A-B-levering met de hypotheekakte er
+   * direct achteraan is een gewone passeerdag.
+   */
+  const [zaaksoorten, setZaaksoorten] = useState<Zaaksoort[]>(["hypotheek"]);
 
   // Een lege lijst betekent een verse upload: dan mogen eerdere
   // uitvink-keuzes niet blijven plakken aan een volgend dossier.
@@ -130,12 +202,12 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
-  const [statusState, setStatusState] = useState<StatusState>("running");
-  const [statusTitle, setStatusTitle] = useState("Verwerken…");
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [logCounter, setLogCounter] = useState(0);
+  const [statusState, setStatusState] = useState<ProgressState>("running");
+  const [phaseIndex, setPhaseIndex] = useState(0);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showStatus, setShowStatus] = useState(false);
   const [result, setResult] = useState<GenerationResult | null>(null);
+  const phaseTimersRef = useRef<number[]>([]);
 
   const [recent, setRecent] = useState<RecentAkte[]>([]);
   const [recentLoading, setRecentLoading] = useState(true);
@@ -157,6 +229,12 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
   useEffect(() => {
     loadRecent();
   }, [loadRecent]);
+
+  // Fase-timers opruimen bij unmount (voorkomt setState op unmounted component).
+  useEffect(() => {
+    const timers = phaseTimersRef;
+    return () => timers.current.forEach((t) => window.clearTimeout(t));
+  }, []);
 
   const isAnalyseOnly = mode === "analyse";
   const requiresAkteInputs = mode === "akte";
@@ -193,25 +271,36 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
     ];
   }, [currentStep, inputsReady]);
 
-  function addLog(text: string, kind: LogKind = "info") {
-    setLogs((prev) => [
-      ...prev,
-      {
-        id: logCounter + prev.length,
-        time: formatTime(new Date()),
-        text,
-        kind,
-      },
-    ]);
-    setLogCounter((n) => n + 1);
+  // Fase-labels: de drie echte pijplijn-stappen. De overgang komt bij beide
+  // flows uit de job-status van de workflow, dus wat hier staat is wat er
+  // werkelijk draait.
+  const progressPhases = isAnalyseOnly
+    ? ["Documenten omzetten", "Juridische analyse", "Rapport opmaken"]
+    : ["Documenten omzetten", "Gegevens extraheren", "Akte opmaken & controleren"];
+
+  function clearPhaseTimers() {
+    phaseTimersRef.current.forEach((t) => window.clearTimeout(t));
+    phaseTimersRef.current = [];
+  }
+
+  /** Aan- of uitvinken; de laatste zaaksoort kan niet uit — dan zou er niets te analyseren zijn. */
+  function toggleZaaksoort(waarde: Zaaksoort) {
+    setZaaksoorten((huidig) => {
+      if (huidig.includes(waarde)) {
+        return huidig.length === 1 ? huidig : huidig.filter((z) => z !== waarde);
+      }
+      return ZAAKSOORT_VOLGORDE.filter((z) => z === waarde || huidig.includes(z));
+    });
   }
 
   function resetForm() {
     handleAkteFilesChange([]);
     handleAnalyseFilesChange([]);
-    setLogs([]);
+    clearPhaseTimers();
     setShowStatus(false);
     setResult(null);
+    setErrorMessage(null);
+    setPhaseIndex(0);
     setCurrentStep(1);
   }
 
@@ -226,28 +315,19 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
     setIsGenerating(true);
     setShowStatus(true);
     setResult(null);
-    setLogs([]);
+    setErrorMessage(null);
+    setPhaseIndex(0);
     setStatusState("running");
-    setStatusTitle("Verwerken…");
     setCurrentStep(2);
-
-    addLog("Bestanden voorbereiden…");
 
     const sourceFiles = selectedFiles;
     const uploadFiles = dedupeFilesForUpload(sourceFiles);
     if (uploadFiles.length === 0) {
-      addLog("Geen bruikbare bestanden na filteren.", "error");
+      setErrorMessage("Geen bruikbare bestanden na filteren.");
       setStatusState("error");
-      setStatusTitle("Geen bestanden");
       setIsGenerating(false);
       setCurrentStep(1);
       return;
-    }
-    if (uploadFiles.length < sourceFiles.length) {
-      addLog(
-        `${sourceFiles.length - uploadFiles.length} duplicaat of ruisbestand (bijv. .DS_Store, ._*) overgeslagen.`,
-        "info"
-      );
     }
 
     const formData = new FormData();
@@ -256,6 +336,9 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
       uploadFiles.forEach((file, idx) => {
         formData.append(`document_${idx}`, file, file.name);
       });
+      // Context voor de analyse; de workflow valt zonder dit veld terug op
+      // 'hypotheek', het gedrag van vóór deze keuze.
+      formData.append("zaaksoort", zaaksoorten.join(","));
     } else {
       uploadFiles.forEach((file, idx) => {
         formData.append(`dossier_${idx}`, file, file.name);
@@ -263,36 +346,17 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
     }
 
     try {
-      addLog("Verbinding maken met n8n…");
       const responsePromise = fetch(trimmedUrl, {
         method: "POST",
         body: formData,
       });
 
-      await sleep(600);
-      if (isAnalyseOnly) {
-        addLog(
-          `Documenten naar Docling gestuurd (${uploadFiles.length} stuk${
-            uploadFiles.length === 1 ? "" : "s"
-          })…`
-        );
-        await sleep(900);
-        addLog("Markdowns samenvoegen voor juridische analyse…");
-      } else {
-        addLog(
-          `${uploadFiles.length} document(en) naar Docling (hele dossier)…`
-        );
-        await sleep(900);
-        addLog("Ollama extraheert bank- en kadastergegevens…");
-        await sleep(800);
-        addLog("Word template invullen…");
-      }
-      await sleep(600);
-      if (mode !== "akte") {
-        addLog("Juridische analyse van het dossier…");
-      }
+      // Geen geschatte fase-overgangen meer: beide flows draaien als job en
+      // melden hun echte stap terug via /webhook/job-status.
+      clearPhaseTimers();
 
       const response = await responsePromise;
+      clearPhaseTimers();
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -300,22 +364,46 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
 
       const contentType = response.headers.get("content-type") ?? "";
       let downloadUrl: string | undefined;
+      let previewUrl: string | undefined;
       let filename: string | undefined;
       let bankDisplayName: string | undefined;
       let zaaknummer: string | undefined;
       let klantSamenvatting: string | undefined;
       let analyse: JuridischeAnalyseData | undefined;
+      // De workflow echoot terug waarop hij daadwerkelijk heeft geanalyseerd;
+      // wijkt dat af van de keuze hier, dan wint het antwoord.
+      let gebruikteZaaksoort: string = zaaksoortSleutel(zaaksoorten);
+      let bevoegdheid: BeschikkingsbevoegdheidData | undefined;
 
       if (contentType.includes("application/json")) {
-        const data = (await response.json()) as {
+        let payload: unknown = await response.json();
+
+        // De analyse-workflow draait als achtergrondjob: die antwoordt meteen
+        // met een job_id en werkt daarna door. De akte-workflow is nog
+        // synchroon en levert het resultaat in één keer. Aan het antwoord zelf
+        // is te zien welke van de twee het is, dus beide blijven werken.
+        const jobId = jobIdVanAntwoord(payload);
+        if (jobId) {
+          payload = await wachtOpJob<Record<string, unknown>>(jobId, {
+            onStatus: (job) => {
+              const index = job.status ? STATUS_FASE[job.status] : undefined;
+              if (index !== undefined) setPhaseIndex(index);
+            },
+          });
+        }
+
+        const data = payload as {
           mode?: GenerationMode;
           download_url?: string;
+          preview_url?: string;
           file_path?: string;
           filename?: string;
           bank_display_name?: string;
           zaaknummer?: string;
           klant_samenvatting?: string;
           analysis?: JuridischeAnalyseData | null;
+          zaaksoort?: string;
+          beschikkingsbevoegdheid?: BeschikkingsbevoegdheidData | null;
         };
         if (data.filename) filename = data.filename;
 
@@ -326,11 +414,14 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
             "http://localhost:8080/" +
             data.file_path.replace("/data/shared/", "");
         }
+        if (data.preview_url) previewUrl = data.preview_url;
 
         bankDisplayName = data.bank_display_name;
         zaaknummer = data.zaaknummer;
         klantSamenvatting = data.klant_samenvatting;
         analyse = data.analysis ?? undefined;
+        gebruikteZaaksoort = data.zaaksoort ?? gebruikteZaaksoort;
+        bevoegdheid = data.beschikkingsbevoegdheid ?? undefined;
       } else if (!isAnalyseOnly) {
         // Fallback: blob (alleen akte-flow zonder JSON response).
         const blob = await response.blob();
@@ -338,46 +429,28 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
         filename = "hypotheekakte.docx";
       }
 
-      await sleep(300);
-      if (analyse) {
-        const totaal =
-          analyse.counts?.totaal ?? (analyse.aandachtspunten?.length ?? 0);
-        const kritiek = analyse.counts?.kritiek ?? 0;
-        if (totaal === 0) {
-          addLog("Analyse: geen aandachtspunten geconstateerd.", "success");
-        } else if (kritiek > 0) {
-          addLog(
-            `Analyse: ${totaal} aandachtspunt(en), waarvan ${kritiek} kritiek.`,
-            "info"
-          );
-        } else {
-          addLog(`Analyse: ${totaal} aandachtspunt(en).`, "info");
-        }
-      }
-      if (filename) {
-        addLog("Akte succesvol aangemaakt.", "success");
-      } else if (isAnalyseOnly) {
-        addLog("Juridische analyse afgerond.", "success");
-      }
+      setPhaseIndex(progressPhases.length - 1);
       setStatusState("done");
-      setStatusTitle("Gereed");
       setCurrentStep(3);
       setResult({
         mode,
         downloadUrl,
+        previewUrl,
         filename,
         bankDisplayName,
         zaaknummer,
         klantSamenvatting,
         analyse,
+        zaaksoort: isAnalyseOnly ? gebruikteZaaksoort : undefined,
+        bevoegdheid,
       });
       // Nieuw gegenereerd bestand staat nu in shared/output — lijst verversen.
       loadRecent();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      addLog(`Fout: ${message}`, "error");
+      clearPhaseTimers();
+      setErrorMessage(message);
       setStatusState("error");
-      setStatusTitle("Fout opgetreden");
     } finally {
       setIsGenerating(false);
     }
@@ -489,11 +562,69 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
             )}
           </Panel>
 
+          {/* Context — alleen zinvol bij de analyse; de akte-flow kent maar één zaaksoort */}
+          {isAnalyseOnly && (
+            <Panel
+              kicker="03"
+              label="Zaaksoort"
+              description="Waar gaat deze zaak over? De analyse richt de vier specialisten en de eindbeoordeling op die transactie. Bevat het dossier er meer dan één — een levering met de hypotheekakte er direct achteraan — vink ze dan allebei aan."
+            >
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {ZAAKSOORT_OPTIES.map((optie) => {
+                  const actief = zaaksoorten.includes(optie.waarde);
+                  const laatste = actief && zaaksoorten.length === 1;
+                  return (
+                    <button
+                      key={optie.waarde}
+                      type="button"
+                      onClick={() => toggleZaaksoort(optie.waarde)}
+                      role="checkbox"
+                      aria-checked={actief}
+                      title={
+                        laatste
+                          ? "Er moet minstens één zaaksoort aan blijven staan"
+                          : undefined
+                      }
+                      disabled={isGenerating}
+                      className={cn(
+                        "rounded-md border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                        actief
+                          ? "border-ink-strong bg-wash/60"
+                          : "border-line bg-surface hover:bg-wash/30"
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "flex h-4 w-4 items-center justify-center rounded-[3px] border",
+                            actief
+                              ? "border-ink-strong bg-ink-strong text-paper"
+                              : "border-line bg-paper"
+                          )}
+                        >
+                          {actief && <Check className="h-3 w-3" strokeWidth={3} />}
+                        </span>
+                        <span className="text-[14px] font-semibold text-ink-strong">
+                          {optie.label}
+                        </span>
+                      </div>
+                      <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
+                        {optie.omschrijving}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </Panel>
+          )}
+
           {/* CTA — kalm paneel, zelfde surface als de andere kaarten */}
           <div className="relative overflow-hidden rounded-lg cta-panel shadow-card">
             <div className="relative p-6 sm:p-7">
               <div className="mb-3 flex items-center gap-3">
-                <span className="font-mono text-[11px] font-medium text-ink-mute">03</span>
+                <span className="font-mono text-[11px] font-medium text-ink-mute">
+                  {isAnalyseOnly ? "04" : "03"}
+                </span>
                 <span className="h-px w-10 bg-line" />
                 <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft">
                   Genereren
@@ -523,6 +654,12 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
                       label="Modus"
                       value={modeMeta.shortLabel}
                     />
+                    {isAnalyseOnly && (
+                      <SummaryChip
+                        label="Zaaksoort"
+                        value={zaaksoortLabel(zaaksoortSleutel(zaaksoorten))}
+                      />
+                    )}
                     <SummaryChip
                       label="Output"
                       value={mode === "analyse" ? "Analyse" : "Akte (.docx)"}
@@ -591,12 +728,13 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
             </div>
           </div>
 
-          {/* Statuslog */}
+          {/* Voortgang — rustige spinner met de drie echte fasen */}
           {showStatus && (
-            <StatusLog
+            <GenerationProgress
+              phases={progressPhases}
+              phase={phaseIndex}
               state={statusState}
-              title={statusTitle}
-              entries={logs}
+              errorMessage={errorMessage}
             />
           )}
 
@@ -631,6 +769,11 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Inline voorbeeld van de gegenereerde akte (met arceringen) */}
+          {result?.previewUrl && (
+            <AktePreview url={result.previewUrl} filename={result.filename} />
           )}
 
           {/* Resultaat — analyse-only */}
@@ -668,6 +811,41 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
             </div>
           )}
 
+          {/* Beschikkingsbevoegdheid — hoort bij de akte, niet bij de analyse */}
+          {result?.bevoegdheid && (
+            <div className="space-y-3">
+              <div
+                className={
+                  "flex items-start gap-3 rounded-lg border p-4 " +
+                  (result.bevoegdheid.status === "rond"
+                    ? "border-azure/30 bg-azure-pale"
+                    : "border-amber-400/50 bg-amber-50")
+                }
+              >
+                <Scale
+                  className="mt-0.5 h-5 w-5 flex-shrink-0 text-ink-strong"
+                  strokeWidth={2}
+                />
+                <div>
+                  <div className="text-[15px] font-semibold leading-tight text-ink-strong">
+                    Beschikkingsbevoegdheid
+                  </div>
+                  <div className="mt-1 text-[13px] leading-snug text-ink">
+                    {result.bevoegdheid.samenvatting}
+                  </div>
+                </div>
+              </div>
+              {result.bevoegdheid.aandachtspunten.length > 0 && (
+                <JuridischeAnalyse
+                  analyse={result.bevoegdheid}
+                  zaaknummer={result.zaaknummer}
+                  bank={result.bankDisplayName}
+                  klant={result.klantSamenvatting}
+                />
+              )}
+            </div>
+          )}
+
           {/* Juridische analyse-blok */}
           {result?.analyse && (
             <JuridischeAnalyse
@@ -675,6 +853,7 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
               zaaknummer={result.zaaknummer}
               bank={result.bankDisplayName}
               klant={result.klantSamenvatting}
+              zaaksoort={result.zaaksoort}
             />
           )}
         </div>

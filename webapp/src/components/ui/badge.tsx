@@ -16,7 +16,7 @@ const badgeVariants = cva(
         seal: "border-seal/40 bg-seal/10 text-seal-deep",
         amber: "border-amber/40 bg-amber/10 text-amber",
         danger: "border-danger/40 bg-danger/8 text-danger",
-        dark: "border-line-dark bg-ink-deep text-paper",
+        dark: "border-line-dark bg-ink-deep text-ink-strong",
       },
     },
     defaultVariants: {

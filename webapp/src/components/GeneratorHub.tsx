@@ -1,7 +1,7 @@
-import { ArrowRight, FileSignature, FileText, Scale } from "lucide-react";
+import { ArrowRight, FileSignature, FileText, Scale, ScrollText } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import type { GenerationMode } from "@/components/AkteGenerator";
+import type { DocumentSoort } from "@/lib/documentsoorten";
 
 /**
  * Keuze-overzicht van het Genereren-tabblad. De gebruiker kiest via cards
@@ -11,14 +11,14 @@ import type { GenerationMode } from "@/components/AkteGenerator";
  */
 
 interface GeneratorHubProps {
-  onSelect: (mode: GenerationMode) => void;
+  onSelect: (mode: DocumentSoort) => void;
 }
 
 type Accent = "azure" | "seal" | "ink";
 
 interface GeneratorChoice {
-  /** Zet op een `GenerationMode` als de flow beschikbaar is; `null` = binnenkort. */
-  mode: GenerationMode | null;
+  /** Zet op een documentsoort als de flow beschikbaar is; `null` = binnenkort. */
+  mode: DocumentSoort | null;
   title: string;
   description: string;
   icon: typeof FileText;
@@ -45,6 +45,15 @@ const CHOICES: GeneratorChoice[] = [
     icon: Scale,
     accent: "seal",
     points: ["Vier specialisten", "Aandachtspunten", "Vanaf 1 stuk"],
+  },
+  {
+    mode: "testament",
+    title: "Testament",
+    description:
+      "Stel een concept-testament samen uit tekstblokken, met de offerte erbij. Komt de bespreking uit een verslag, dan worden de blokken voorgesteld.",
+    icon: ScrollText,
+    accent: "seal",
+    points: ["Uit het besprekingsverslag", "Concept + offerte", "Word (.docx)"],
   },
   {
     mode: null,
@@ -105,7 +114,7 @@ function ChoiceCard({
   onSelect,
 }: {
   choice: GeneratorChoice;
-  onSelect: (mode: GenerationMode) => void;
+  onSelect: (mode: DocumentSoort) => void;
 }) {
   const { mode, title, description, icon: Icon, accent, points } = choice;
   const available = mode !== null;

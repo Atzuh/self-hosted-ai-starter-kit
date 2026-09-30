@@ -1,0 +1,304 @@
+{
+  "$comment": "Tekstblokken waaruit een concept-testament wordt opgebouwd, met de prijs die elk blok aan de offerte toevoegt. Een blok hangt aan een kopje uit het bespreeksjabloon (shared/templates/besprekingen/testament.json); kwam er in de bespreking inhoud onder dat kopje, dan wordt het blok in de bouwer voorgesteld. LET OP: de teksten en bedragen hieronder zijn voorbeelden om de mechaniek te kunnen beproeven. Ze zijn NIET juridisch nagekeken en NIET het tarief van het kantoor. Vervang ze via de Templates-pagina voordat er een akte of offerte de deur uit gaat. Bedragen staan in hele centen (49500 = EUR 495,00); het beheerscherm toont en bewerkt ze in euro's. Dat voorkomt afrondingsverschillen bij het optellen en bij de BTW.",
+  "soort": "testament",
+  "naam": "Testament",
+  "bespreeksjabloon": "testament",
+  "basistarief_cent": 51000,
+  "tarief_tweede_testament_cent": 29500,
+  "verschotten": [
+    {
+      "naam": "Registratie Centraal Testamentenregister",
+      "bedrag_cent": 2150,
+      "per_testament": true
+    }
+  ],
+  "blokken": [
+    {
+      "id": "aanhef",
+      "naam": "Aanhef en comparitie",
+      "kop": null,
+      "altijd": true,
+      "prijs_cent": 0,
+      "tekst": "Heden, <<AKTE_DATUM>>, verscheen voor mij, <<NOTARIS_NAAM>>, notaris met plaats van vestiging <<NOTARIS_STANDPLAATS>>:\n<<ERFLATERS>>\nDe comparant verklaarde bij deze akte te beschikken over de eigen nalatenschap en alle eerder gemaakte uiterste wilsbeschikkingen te herroepen.",
+      "velden": []
+    },
+    {
+      "id": "erfstelling-eerste",
+      "naam": "Eerste erfstelling",
+      "kop": "Eerste erfstelling",
+      "altijd": false,
+      "prijs_cent": 0,
+      "tekst": "ERFSTELLING\nIk benoem tot mijn enige erfgena(a)m(en): <<ERFGENAAM_EERSTE>>.",
+      "velden": [
+        {
+          "naam": "ERFGENAAM_EERSTE",
+          "label": "Wie erft in eerste instantie",
+          "hint": "Bijvoorbeeld: mijn echtgenote, of mijn echtgenote en mijn kinderen tezamen, ieder voor een gelijk deel."
+        }
+      ]
+    },
+    {
+      "id": "erfstelling-tweede",
+      "naam": "Tweede erfstelling",
+      "kop": "Tweede erfstelling",
+      "altijd": false,
+      "prijs_cent": 4500,
+      "tekst": "Mocht ik komen te overlijden zonder dat de hiervoor genoemde erfstelling effect heeft, dan benoem ik tot mijn erfgena(a)m(en): <<ERFGENAAM_TWEEDE>>.",
+      "velden": [
+        {
+          "naam": "ERFGENAAM_TWEEDE",
+          "label": "Wie erft als de eerste erfstelling wegvalt",
+          "hint": ""
+        }
+      ]
+    },
+    {
+      "id": "erfstelling-derde",
+      "naam": "Derde erfstelling",
+      "kop": "Derde erfstelling",
+      "altijd": false,
+      "prijs_cent": 4500,
+      "tekst": "Mocht ook de vorige erfstelling geen effect hebben, dan benoem ik tot mijn erfgena(a)m(en): <<ERFGENAAM_DERDE>>.",
+      "velden": [
+        {
+          "naam": "ERFGENAAM_DERDE",
+          "label": "Wie erft als ook de tweede erfstelling wegvalt",
+          "hint": "Bijvoorbeeld: mijn erfgenamen volgens de wet, of half mijn familie en half die van mijn echtgenoot."
+        }
+      ]
+    },
+    {
+      "id": "plaatsvervulling",
+      "naam": "Plaatsvervulling en onterving",
+      "kop": "Plaatsvervulling en onterving",
+      "altijd": false,
+      "prijs_cent": 5500,
+      "tekst": "PLAATSVERVULLING\nVoor <<PLAATSVERVULLING_VOOR>> geldt plaatsvervulling overeenkomstig de wet.\nIk onterf uitdrukkelijk: <<ONTERVING>>.",
+      "velden": [
+        {
+          "naam": "PLAATSVERVULLING_VOOR",
+          "label": "Voor wie geldt plaatsvervulling",
+          "hint": ""
+        },
+        {
+          "naam": "ONTERVING",
+          "label": "Wie wordt onterfd",
+          "hint": "Laat leeg als er niemand wordt onterfd; de regel komt dan gearceerd in het concept te staan."
+        }
+      ]
+    },
+    {
+      "id": "soort-testament",
+      "naam": "Soort testament",
+      "kop": "Soort testament",
+      "altijd": false,
+      "prijs_cent": 0,
+      "tekst": "Deze uiterste wil is opgesteld als <<SOORT_TESTAMENT>>.",
+      "velden": [
+        {
+          "naam": "SOORT_TESTAMENT",
+          "label": "Soort testament",
+          "hint": "Wettelijke verdeling, combinatietestament, flextestament, of partner-erfgenaam met legaat aan de kinderen."
+        }
+      ]
+    },
+    {
+      "id": "opeisingsgronden",
+      "naam": "Opeisingsgronden en rente",
+      "kop": "Opeisingsgronden en rente",
+      "altijd": false,
+      "prijs_cent": 7500,
+      "tekst": "OPEISBAARHEID EN RENTE\nDe vordering van de kinderen is opeisbaar in de volgende gevallen: <<OPEISINGSGRONDEN>>.\nOver de vordering is de volgende rente verschuldigd: <<RENTE>>.",
+      "velden": [
+        {
+          "naam": "OPEISINGSGRONDEN",
+          "label": "Wanneer is de vordering opeisbaar",
+          "hint": ""
+        },
+        {
+          "naam": "RENTE",
+          "label": "Rente over de vordering",
+          "hint": "Bijvoorbeeld: renteloos, of de wettelijke rente, of een percentage naar keuze van de langstlevende."
+        }
+      ]
+    },
+    {
+      "id": "rechtskeuze",
+      "naam": "Rechtskeuze",
+      "kop": "Rechtskeuze",
+      "altijd": false,
+      "prijs_cent": 4000,
+      "tekst": "RECHTSKEUZE\nIk verklaar dat op mijn nalatenschap <<RECHTSKEUZE>> van toepassing is.",
+      "velden": [
+        {
+          "naam": "RECHTSKEUZE",
+          "label": "Toepasselijk recht",
+          "hint": "Bijvoorbeeld: het Nederlandse erfrecht."
+        }
+      ]
+    },
+    {
+      "id": "uitsluitingsclausule",
+      "naam": "Uitsluitingsclausule",
+      "kop": "Uitsluitingsclausule",
+      "altijd": false,
+      "prijs_cent": 4500,
+      "tekst": "UITSLUITINGSCLAUSULE\nAl hetgeen uit mijn nalatenschap wordt verkregen blijft privévermogen van de verkrijger. Het valt niet in enige gemeenschap van goederen en is niet vatbaar voor verrekening op grond van huwelijkse voorwaarden of partnerschapsvoorwaarden. <<UITSLUITING_VARIANT>>",
+      "velden": [
+        {
+          "naam": "UITSLUITING_VARIANT",
+          "label": "Aanvulling op de uitsluiting",
+          "hint": "Bijvoorbeeld een blokkering van consumptieve besteding. Laat leeg voor een harde uitsluiting zonder toevoeging."
+        }
+      ]
+    },
+    {
+      "id": "dertigdagenclausule",
+      "naam": "Dertigdagenclausule",
+      "kop": "Dertigdagenclausule",
+      "altijd": false,
+      "prijs_cent": 3500,
+      "tekst": "DERTIGDAGENCLAUSULE\nAls voorwaarde voor verkrijging uit mijn nalatenschap geldt dat de verkrijger mij ten minste dertig dagen overleeft. Deze voorwaarde geldt voor: <<DERTIGDAGEN_VOOR>>.",
+      "velden": [
+        {
+          "naam": "DERTIGDAGEN_VOOR",
+          "label": "Voor wie geldt de clausule",
+          "hint": "Alle erfgenamen, de partner, de afstammelingen, of anders."
+        }
+      ]
+    },
+    {
+      "id": "tweetrapsmaking",
+      "naam": "Tweetrapsmaking",
+      "kop": "Tweetrapsmaking",
+      "altijd": false,
+      "prijs_cent": 14500,
+      "tekst": "TWEETRAPSMAKING\nIk maak een tweetrapsmaking, waarbij bezwaarde is: <<BEZWAARDE>>, en verwachter(s): <<VERWACHTERS>>.\nDe bezwaarde heeft <<BESCHIKKINGSBEVOEGDHEID>>.",
+      "velden": [
+        {
+          "naam": "BEZWAARDE",
+          "label": "Bezwaarde",
+          "hint": ""
+        },
+        {
+          "naam": "VERWACHTERS",
+          "label": "Verwachter(s)",
+          "hint": ""
+        },
+        {
+          "naam": "BESCHIKKINGSBEVOEGDHEID",
+          "label": "Beschikkings- en verteringsbevoegdheid",
+          "hint": "Bijvoorbeeld: volledige beschikkings- en verteringsbevoegdheid."
+        }
+      ]
+    },
+    {
+      "id": "voogdij",
+      "naam": "Voogdij",
+      "kop": "Voogdij",
+      "altijd": false,
+      "prijs_cent": 7500,
+      "tekst": "VOOGDIJ\nIk benoem tot voogd over mijn minderjarige kinderen: <<VOOGD_NAAM>>, wonende te <<VOOGD_WOONPLAATS>>.\nMocht deze benoeming geen effect hebben, dan benoem ik tot voogd: <<VOOGD_OPVOLGER>>.",
+      "velden": [
+        {
+          "naam": "VOOGD_NAAM",
+          "label": "Naam voogd",
+          "hint": ""
+        },
+        {
+          "naam": "VOOGD_WOONPLAATS",
+          "label": "Woonplaats voogd",
+          "hint": ""
+        },
+        {
+          "naam": "VOOGD_OPVOLGER",
+          "label": "Opvolgend voogd",
+          "hint": "Laat leeg als er geen opvolger is benoemd."
+        }
+      ]
+    },
+    {
+      "id": "bewind",
+      "naam": "Bewind",
+      "kop": "Bewind",
+      "altijd": false,
+      "prijs_cent": 9500,
+      "tekst": "BEWIND\nIk stel al hetgeen <<BEWIND_OVER_WIE>> uit mijn nalatenschap verkrijgt onder bewind. Tot bewindvoerder benoem ik: <<BEWINDVOERDER>>.\nHet bewind eindigt <<BEWIND_EINDE>>.",
+      "velden": [
+        {
+          "naam": "BEWIND_OVER_WIE",
+          "label": "Wie staat onder bewind",
+          "hint": ""
+        },
+        {
+          "naam": "BEWINDVOERDER",
+          "label": "Bewindvoerder",
+          "hint": ""
+        },
+        {
+          "naam": "BEWIND_EINDE",
+          "label": "Einde van het bewind",
+          "hint": "Bijvoorbeeld: bij het bereiken van de leeftijd van drieëntwintig jaar, of levenslang."
+        }
+      ]
+    },
+    {
+      "id": "executele",
+      "naam": "Executele",
+      "kop": "Executele",
+      "altijd": false,
+      "prijs_cent": 8500,
+      "tekst": "EXECUTELE\nIk benoem tot executeur: <<EXECUTEUR>>. Mocht deze benoeming geen effect hebben, dan benoem ik tot executeur: <<EXECUTEUR_OPVOLGER>>.\nDe executeur heeft recht op de volgende beloning: <<EXECUTEUR_BELONING>>.",
+      "velden": [
+        {
+          "naam": "EXECUTEUR",
+          "label": "Executeur",
+          "hint": ""
+        },
+        {
+          "naam": "EXECUTEUR_OPVOLGER",
+          "label": "Opvolgend executeur",
+          "hint": "Laat leeg als er geen opvolger is benoemd."
+        },
+        {
+          "naam": "EXECUTEUR_BELONING",
+          "label": "Beloning executeur",
+          "hint": "Bijvoorbeeld: de wettelijke beloning van één procent van het vermogen."
+        }
+      ]
+    },
+    {
+      "id": "legaten",
+      "naam": "Legaten",
+      "kop": "Legaten",
+      "altijd": false,
+      "prijs_cent": 6500,
+      "tekst": "LEGATEN\nIk legateer, vrij van rechten en kosten en af te geven binnen zes maanden na mijn overlijden: <<LEGATEN>>.",
+      "velden": [
+        {
+          "naam": "LEGATEN",
+          "label": "Wat wordt gelegateerd en aan wie",
+          "hint": "Neem per legaat de begunstigde en het bedrag of goed op."
+        }
+      ]
+    },
+    {
+      "id": "vruchtgenot",
+      "naam": "Uitsluiting ouderlijk vruchtgenot",
+      "kop": "Uitsluiting ouderlijk vruchtgenot",
+      "altijd": false,
+      "prijs_cent": 3000,
+      "tekst": "UITSLUITING OUDERLIJK VRUCHTGENOT\nIk sluit het ouderlijk vruchtgenot uit ten aanzien van al hetgeen uit mijn nalatenschap wordt verkregen door een minderjarige.",
+      "velden": []
+    },
+    {
+      "id": "slot",
+      "naam": "Slotformule",
+      "kop": null,
+      "altijd": true,
+      "prijs_cent": 0,
+      "tekst": "<<SLOT_TEKST>>",
+      "velden": []
+    }
+  ]
+}

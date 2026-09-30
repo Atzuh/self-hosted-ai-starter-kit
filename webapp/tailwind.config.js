@@ -120,15 +120,12 @@ export default {
         sm: "calc(var(--radius) - 2px)",
       },
       boxShadow: {
-        card: "0 1px 0 hsla(0, 0%, 100%, 0.02) inset, 0 2px 8px hsla(220, 80%, 2%, 0.4), 0 14px 32px hsla(220, 80%, 2%, 0.35)",
-        "card-hover":
-          "0 1px 0 hsla(0, 0%, 100%, 0.04) inset, 0 4px 16px hsla(220, 80%, 2%, 0.5), 0 24px 48px hsla(220, 80%, 2%, 0.45)",
+        card: "var(--shadow-card)",
+        "card-hover": "var(--shadow-card-hover)",
         ring: "0 0 0 1px hsl(var(--line))",
         "ring-strong": "0 0 0 1px hsl(var(--line-strong))",
-        glow:
-          "0 0 0 1px hsla(209, 95%, 60%, 0.45), 0 8px 32px hsla(209, 95%, 60%, 0.28)",
-        "glow-seal":
-          "0 0 0 1px hsla(36, 65%, 60%, 0.45), 0 8px 32px hsla(36, 65%, 60%, 0.25)",
+        glow: "var(--shadow-glow)",
+        "glow-seal": "var(--shadow-glow-seal)",
         "inner-line": "inset 0 0 0 1px hsl(var(--line))",
       },
       keyframes: {

@@ -1,15 +1,17 @@
 import {
-  Bell,
-  Command,
   FileText,
   LayoutDashboard,
   LayoutTemplate,
-  Search,
+  Mic,
+  Moon,
   Settings,
   ShieldCheck,
+  Sun,
 } from "lucide-react";
 
+import { LogoMark } from "@/components/LogoMark";
 import { cn } from "@/lib/utils";
+import { useTheme } from "@/lib/theme";
 import type { AppPage } from "@/App";
 
 interface AppHeaderProps {
@@ -25,6 +27,7 @@ const NAV_ITEMS: Array<{
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "controle", label: "Controle", icon: ShieldCheck },
   { id: "generator", label: "Genereren", icon: FileText },
+  { id: "besprekingen", label: "Besprekingen", icon: Mic },
   { id: "templates", label: "Templates", icon: LayoutTemplate },
   { id: "instellingen", label: "Instellingen", icon: Settings },
 ];
@@ -45,12 +48,7 @@ export function AppHeader({
           }}
           className="group flex items-center gap-3"
         >
-          <div className="relative flex h-8 w-8 items-center justify-center rounded-md border border-line-strong bg-ink-deeper shadow-card">
-            <span className="font-display text-[19px] font-medium leading-none text-ink-strong">
-              S
-            </span>
-            <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-seal shadow-[0_0_10px_hsl(var(--seal))]" />
-          </div>
+          <LogoMark />
           <div className="hidden flex-col leading-tight sm:flex">
             <div className="font-display text-[19px] font-medium leading-none tracking-tight text-ink-strong">
               Scriptor
@@ -97,36 +95,49 @@ export function AppHeader({
           })}
         </nav>
 
-        {/* Cmd-K-stijl search */}
-        <div className="ml-auto hidden flex-1 items-center justify-end gap-2 lg:flex lg:max-w-md">
-          <div className="relative w-full">
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-mute"
-              strokeWidth={2}
-            />
-            <input
-              type="search"
-              placeholder="Zoek dossier, cliënt, akte…"
-              className="h-9 w-full rounded-md border border-line bg-surface/60 pl-9 pr-14 text-[13px] text-ink-strong placeholder:text-ink-mute transition-colors hover:border-line-strong focus:border-azure focus:bg-surface focus:outline-none focus:ring-4 focus:ring-azure/15"
-            />
-            <div className="pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded border border-line bg-paper px-1.5 py-0.5 font-mono text-[10px] font-medium text-ink-soft">
-              <Command className="h-2.5 w-2.5" strokeWidth={2.25} />K
-            </div>
-          </div>
-        </div>
-
-        {/* Notificatie */}
-        <div className="ml-auto flex items-center gap-2 lg:ml-0">
-          <button
-            type="button"
-            className="relative flex h-9 w-9 items-center justify-center rounded-md text-ink-soft transition-colors hover:bg-wash hover:text-ink-strong"
-            aria-label="Notificaties"
-          >
-            <Bell className="h-4 w-4" strokeWidth={2} />
-            <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-seal" />
-          </button>
+        {/* Thema-schakelaar */}
+        <div className="ml-auto flex items-center">
+          <ThemeToggle />
         </div>
       </div>
     </header>
+  );
+}
+
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+  const light = theme === "light";
+
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={light}
+      aria-label="Lichte weergave"
+      title={light ? "Schakel naar donkere weergave" : "Schakel naar lichte weergave"}
+      onClick={() => setTheme(light ? "dark" : "light")}
+      className="relative flex h-7 w-[52px] flex-shrink-0 items-center rounded-full border border-line-strong bg-wash transition-colors hover:border-ink-mute focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-azure/20"
+    >
+      <Moon
+        className="absolute left-[7px] h-3 w-3 text-ink-mute"
+        strokeWidth={2.25}
+      />
+      <Sun
+        className="absolute right-[7px] h-3 w-3 text-ink-mute"
+        strokeWidth={2.25}
+      />
+      <span
+        className={cn(
+          "absolute left-[3px] flex h-5 w-5 items-center justify-center rounded-full bg-surface text-ink-strong shadow-card transition-transform duration-200",
+          light && "translate-x-6"
+        )}
+      >
+        {light ? (
+          <Sun className="h-3 w-3 text-seal" strokeWidth={2.5} />
+        ) : (
+          <Moon className="h-3 w-3 text-azure" strokeWidth={2.5} />
+        )}
+      </span>
+    </button>
   );
 }

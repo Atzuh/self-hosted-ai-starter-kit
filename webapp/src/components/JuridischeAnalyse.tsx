@@ -47,6 +47,8 @@ interface JuridischeAnalyseProps {
   zaaknummer?: string;
   bank?: string;
   klant?: string;
+  /** Zaaksoort waarop de analyse is gericht ("hypotheek" | "levering"). */
+  zaaksoort?: string;
 }
 
 const ERNST_LABEL: Record<Ernst, string> = {
@@ -83,6 +85,16 @@ function bronLabel(bron: string): string {
   if (b.includes("kadaster")) return "Kadaster";
   if (b.includes("extractie")) return "Extractie";
   return bron;
+}
+
+function zaaksoortLabel(zaaksoort: string): string {
+  const z = zaaksoort.toLowerCase();
+  // Een dossier kan meer dan één transactie bevatten; de sleutel is dan de
+  // gesorteerde combinatie, bijvoorbeeld "hypotheek+levering".
+  if (z.includes("+")) return "Levering en hypotheek";
+  if (z === "levering") return "Levering";
+  if (z === "hypotheek") return "Hypotheek";
+  return zaaksoort;
 }
 
 function ItemCard({ punt, index }: { punt: AandachtsPunt; index: number }) {
@@ -209,6 +221,7 @@ export function JuridischeAnalyse({
   zaaknummer,
   bank,
   klant,
+  zaaksoort,
 }: JuridischeAnalyseProps) {
   const counts = useMemo<AnalyseCounts>(() => {
     if (analyse.counts) return analyse.counts;
@@ -240,6 +253,7 @@ export function JuridischeAnalyse({
             </h2>
             <div className="mt-1.5 font-mono text-[11px] text-ink-soft">
               {[
+                zaaksoort ? `Zaaksoort: ${zaaksoortLabel(zaaksoort)}` : null,
                 bank ? `Bank: ${bank}` : null,
                 zaaknummer ? `Zaak: ${zaaknummer}` : null,
                 klant ? `Cliënt: ${klant}` : null,

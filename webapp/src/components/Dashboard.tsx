@@ -1,4 +1,4 @@
-import { ArrowRight, FileText, LayoutTemplate, ShieldCheck } from "lucide-react";
+import { ArrowRight, FileText, LayoutTemplate, Mic, ShieldCheck } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { AppPage } from "@/App";
@@ -7,7 +7,7 @@ interface DashboardProps {
   onNavigate: (page: AppPage) => void;
 }
 
-type Accent = "azure" | "seal" | "ink";
+type Accent = "azure" | "seal" | "groen" | "ink";
 
 interface QuickAction {
   page: AppPage;
@@ -27,6 +27,14 @@ const ACTIONS: QuickAction[] = [
     accent: "azure",
   },
   {
+    page: "besprekingen",
+    title: "Besprekingen",
+    description:
+      "Neem een bespreking op en laat er een verslag van maken, geordend per onderwerp.",
+    icon: Mic,
+    accent: "groen",
+  },
+  {
     page: "controle",
     title: "Controleren",
     description:
@@ -44,9 +52,13 @@ const ACTIONS: QuickAction[] = [
   },
 ];
 
+// Groen en niet amber voor Besprekingen: --amber (38°) en --seal (36°) liggen in
+// de palettedefinitie vrijwel op dezelfde tint, dus naast de gouden Controleren-
+// kaart zou dat niet als een eigen kleur lezen.
 const ACCENT_ICON: Record<Accent, string> = {
   azure: "border-azure/50 bg-ink-deeper text-azure-glow",
   seal: "border-seal/40 bg-ink-deeper text-seal",
+  groen: "border-success/50 bg-ink-deeper text-success",
   ink: "border-line bg-ink-deeper text-ink-soft",
 };
 

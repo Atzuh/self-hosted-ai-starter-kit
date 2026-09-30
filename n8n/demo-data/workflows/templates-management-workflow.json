@@ -21,7 +21,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\n\nlet registry;\ntry {\n  registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));\n} catch (err) {\n  return [{\n    json: {\n      success: false,\n      error: `Kon registry niet lezen: ${err.message}`,\n      banks: []\n    }\n  }];\n}\n\nconst banks = Object.entries(registry.banks || {}).map(([bankId, b]) => {\n  const templateFilename = b.template_filename || null;\n  const templatePath = templateFilename\n    ? `/data/shared/templates/${bankId}/${templateFilename}`\n    : null;\n  let fileExists = false;\n  let fileSize = null;\n  let fileMtime = null;\n  if (templatePath) {\n    try {\n      const stat = fs.statSync(templatePath);\n      fileExists = true;\n      fileSize = stat.size;\n      fileMtime = stat.mtime.toISOString();\n    } catch {\n      fileExists = false;\n    }\n  }\n  return {\n    bank_id: bankId,\n    display_name: b.display_name || bankId,\n    keywords: b.keywords || [],\n    template_filename: templateFilename,\n    uploaded_at: b.uploaded_at || null,\n    uploaded_by: b.uploaded_by || null,\n    file_exists: fileExists,\n    file_size: fileSize,\n    file_mtime: fileMtime,\n    placeholder_count: Object.keys(b.placeholders || {}).length\n  };\n});\n\nreturn [{\n  json: {\n    success: true,\n    schema_version: registry.schema_version || 1,\n    banks\n  }\n}];"
+        "jsCode": "const fs = require('fs');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\nconst TEMPLATES_DIR = '/data/shared/templates';\n\n// Een read op deze bind-mount kan met EIO falen. De gemeten oorzaak: het\n// projekt staat in ~/Documents en dus in iCloud Drive. Haalt macOS een bestand\n// weg om ruimte te maken, dan blijft er een 'dataless' placeholder achter \u2014\n// de host haalt hem bij lezen stilzwijgend terug, maar een container krijgt\n// over de mount alleen EIO. Dat is dus NIET transient: retries lossen het niet\n// op zolang het bestand niet lokaal staat. Ze vangen wel de echte hikjes af;\n// het vangnet dat telt is de cache van de laatste geslaagde uitlezing.\nconst TRANSIENT = ['EIO', 'EBUSY', 'EAGAIN', 'ESTALE', 'ENOENT'];\nconst MAX_ATTEMPTS = 4;\n\nfunction sleep(ms) {\n  return new Promise((resolve) => setTimeout(resolve, ms));\n}\n\n// openSync/readSync forceert een nieuwe fd; readFileSync kan op VirtioFS op\n// een stale handle blijven hangen en steeds dezelfde EIO teruggeven.\nfunction readFileFresh(filePath) {\n  const fd = fs.openSync(filePath, 'r');\n  try {\n    const size = fs.fstatSync(fd).size;\n    const buf = Buffer.alloc(size);\n    let offset = 0;\n    while (offset < size) {\n      const read = fs.readSync(fd, buf, offset, size - offset, offset);\n      if (read <= 0) break;\n      offset += read;\n    }\n    return buf.subarray(0, offset).toString('utf8');\n  } finally {\n    fs.closeSync(fd);\n  }\n}\n\nasync function readRegistry() {\n  let lastErr;\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    try {\n      return JSON.parse(readFileFresh(REGISTRY_PATH));\n    } catch (err) {\n      lastErr = err;\n      // Een JSON-parsefout is niet transient \u2014 direct stoppen.\n      if (!err.code || !TRANSIENT.includes(err.code)) break;\n      await sleep(attempt * 150);\n    }\n  }\n  throw lastErr;\n}\n\nfunction statSafe(filePath) {\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    try {\n      return fs.statSync(filePath);\n    } catch (err) {\n      if (!err.code || !TRANSIENT.includes(err.code)) return null;\n    }\n  }\n  return null;\n}\n\nconst staticData = $getWorkflowStaticData('global');\n\nlet registry;\ntry {\n  registry = await readRegistry();\n} catch (err) {\n  const cache = staticData.templatesCache;\n  if (cache && Array.isArray(cache.banks)) {\n    // Laatste geslaagde uitlezing serveren, zodat de Templates-pagina blijft\n    // werken zolang het bestand zelf niet te lezen is.\n    return [{\n      json: {\n        success: true,\n        stale: true,\n        warning:\n          `Registry kon nu niet gelezen worden (${err.code || 'fout'}: ${err.message}); ` +\n          `gegevens van ${cache.cached_at} worden getoond. ` +\n          `Bij EIO staat het bestand vermoedelijk niet lokaal maar in iCloud; ` +\n          `open het \u00e9\u00e9n keer op de host of houd de projectmap gedownload.`,\n        schema_version: cache.schema_version,\n        banks: cache.banks,\n      },\n    }];\n  }\n  const hint = err.code === 'EIO'\n    ? ' EIO op deze mount betekent bijna altijd dat macOS het bestand naar iCloud heeft weggeschreven ' +\n      '(dataless placeholder). Open het bestand \u00e9\u00e9n keer op de host, of houd de projectmap lokaal ' +\n      '(Finder: Nu downloaden / Gedownload houden). Een herstart van n8n helpt hier niet.'\n    : '';\n  return [{\n    json: {\n      success: false,\n      error: `Kon registry niet lezen na ${MAX_ATTEMPTS} pogingen: ${err.message}.${hint}`,\n      banks: [],\n    },\n  }];\n}\n\nconst banks = Object.entries(registry.banks || {}).map(([bankId, b]) => {\n  const templateFilename = b.template_filename || null;\n  const templatePath = templateFilename\n    ? `${TEMPLATES_DIR}/${bankId}/${templateFilename}`\n    : null;\n  const stat = templatePath ? statSafe(templatePath) : null;\n  return {\n    bank_id: bankId,\n    display_name: b.display_name || bankId,\n    keywords: b.keywords || [],\n    template_filename: templateFilename,\n    uploaded_at: b.uploaded_at || null,\n    uploaded_by: b.uploaded_by || null,\n    file_exists: Boolean(stat),\n    file_size: stat ? stat.size : null,\n    file_mtime: stat ? stat.mtime.toISOString() : null,\n    placeholder_count: Object.keys(b.placeholders || {}).length,\n  };\n});\n\nconst schemaVersion = registry.schema_version || 1;\nstaticData.templatesCache = {\n  schema_version: schemaVersion,\n  banks,\n  cached_at: new Date().toISOString(),\n};\n\nreturn [{\n  json: {\n    success: true,\n    schema_version: schemaVersion,\n    banks,\n  },\n}];"
       },
       "id": "2c4b9aaf-2222-4fa0-9aaa-templates0002",
       "name": "Read Registry",
@@ -75,7 +75,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const fs = require('fs');\nconst path = require('path');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\nconst TEMPLATES_DIR = '/data/shared/templates';\n\n// Verwacht multipart-form-data: bank_id (text field) + file (binary, .docx)\nconst body = $json.body || $json || {};\nconst bankId = String(body.bank_id || '').trim();\nconst uploadedBy = String(body.uploaded_by || 'webapp').trim() || 'webapp';\n\nif (!bankId) {\n  throw new Error('Veld \\'bank_id\\' ontbreekt in form data.');\n}\nif (!/^[a-z0-9_-]+$/i.test(bankId)) {\n  throw new Error(`Ongeldig bank_id: '${bankId}'. Alleen letters/cijfers/-/_ toegestaan.`);\n}\n\nconst binaries = $binary || {};\nconst binKeys = Object.keys(binaries);\nlet binEntry = binaries.file || binaries.template || (binKeys.length === 1 ? binaries[binKeys[0]] : null);\nif (!binEntry) {\n  for (const k of binKeys) {\n    const fn = String(binaries[k]?.fileName || '').toLowerCase();\n    if (fn.endsWith('.docx')) { binEntry = binaries[k]; break; }\n  }\n}\nif (!binEntry) {\n  throw new Error(\n    `Geen .docx-bestand gevonden in upload. Binary keys: ${binKeys.join(', ') || '(geen)'}.`\n  );\n}\n\nconst originalName = String(binEntry.fileName || 'template.docx');\nif (!originalName.toLowerCase().endsWith('.docx')) {\n  throw new Error(`Alleen .docx-bestanden zijn toegestaan. Ontvangen: ${originalName}`);\n}\n\n// Sanitize filename — voorkom path traversal.\nconst safeName = path.basename(originalName).replace(/[^A-Za-z0-9._-]/g, '_');\nif (!safeName.toLowerCase().endsWith('.docx')) {\n  throw new Error(`Bestandsnaam niet bruikbaar na sanitization: '${safeName}'`);\n}\n\n// Lees registry, valideer bank.\nlet registry;\ntry {\n  registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));\n} catch (err) {\n  throw new Error(`Kon registry niet lezen: ${err.message}`);\n}\nconst banks = registry.banks || {};\nif (!banks[bankId]) {\n  const known = Object.keys(banks).join(', ') || '(geen)';\n  throw new Error(\n    `Bank '${bankId}' is niet bekend in registry.json. ` +\n    `Bekende banken: ${known}. Vraag een ontwikkelaar deze toe te voegen.`\n  );\n}\n\n// Schrijf het bestand.\nconst targetDir = path.join(TEMPLATES_DIR, bankId);\nfs.mkdirSync(targetDir, { recursive: true });\nconst targetPath = path.join(targetDir, safeName);\n\n// In n8n is binEntry.data base64-gecodeerd.\nlet buffer;\nif (binEntry.data) {\n  buffer = Buffer.from(binEntry.data, 'base64');\n} else if (binEntry.binaryData) {\n  buffer = Buffer.from(binEntry.binaryData, 'base64');\n} else {\n  throw new Error('Binary entry bevat geen \\'data\\'-veld om te schrijven.');\n}\nfs.writeFileSync(targetPath, buffer);\n\n// Update registry.\nconst now = new Date().toISOString();\nbanks[bankId].template_filename = safeName;\nbanks[bankId].uploaded_at = now;\nbanks[bankId].uploaded_by = uploadedBy;\nfs.writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2) + '\\n', 'utf8');\n\nreturn [{\n  json: {\n    success: true,\n    bank_id: bankId,\n    display_name: banks[bankId].display_name || bankId,\n    template_filename: safeName,\n    template_path: targetPath,\n    file_size: buffer.length,\n    uploaded_at: now,\n    uploaded_by: uploadedBy\n  }\n}];"
+        "jsCode": "const fs = require('fs');\nconst path = require('path');\nconst REGISTRY_PATH = '/data/shared/templates/registry.json';\nconst TEMPLATES_DIR = '/data/shared/templates';\n\n// Zie de toelichting in 'Read Registry': een EIO op deze bind-mount wijst\n// meestal op een bestand dat macOS naar iCloud heeft weggeschreven. Lezen \u00e9n\n// schrijven daarom met retries, en schrijven atomair (temp-bestand + rename)\n// zodat een halve registry nooit op schijf belandt als het misgaat.\nconst TRANSIENT = ['EIO', 'EBUSY', 'EAGAIN', 'ESTALE', 'ENOENT'];\nconst MAX_ATTEMPTS = 4;\n\nfunction sleep(ms) {\n  return new Promise((resolve) => setTimeout(resolve, ms));\n}\n\nfunction readFileFresh(filePath) {\n  const fd = fs.openSync(filePath, 'r');\n  try {\n    const size = fs.fstatSync(fd).size;\n    const buf = Buffer.alloc(size);\n    let offset = 0;\n    while (offset < size) {\n      const read = fs.readSync(fd, buf, offset, size - offset, offset);\n      if (read <= 0) break;\n      offset += read;\n    }\n    return buf.subarray(0, offset).toString('utf8');\n  } finally {\n    fs.closeSync(fd);\n  }\n}\n\nasync function readRegistry() {\n  let lastErr;\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    try {\n      return JSON.parse(readFileFresh(REGISTRY_PATH));\n    } catch (err) {\n      lastErr = err;\n      if (!err.code || !TRANSIENT.includes(err.code)) break;\n      await sleep(attempt * 150);\n    }\n  }\n  throw lastErr;\n}\n\nasync function writeFileAtomic(target, data) {\n  let lastErr;\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    const tmp = `${target}.tmp-${Date.now()}-${attempt}`;\n    try {\n      fs.writeFileSync(tmp, data);\n      fs.renameSync(tmp, target);\n      return;\n    } catch (err) {\n      lastErr = err;\n      try { fs.unlinkSync(tmp); } catch { /* tmp bestond al niet */ }\n      if (!err.code || !TRANSIENT.includes(err.code)) break;\n      await sleep(attempt * 150);\n    }\n  }\n  throw lastErr;\n}\n\n// Verwacht multipart-form-data: bank_id (text field) + file (binary, .docx)\nconst body = $json.body || $json || {};\nconst bankId = String(body.bank_id || '').trim();\nconst uploadedBy = String(body.uploaded_by || 'webapp').trim() || 'webapp';\n\nif (!bankId) {\n  throw new Error('Veld \\'bank_id\\' ontbreekt in form data.');\n}\nif (!/^[a-z0-9_-]+$/i.test(bankId)) {\n  throw new Error(`Ongeldig bank_id: '${bankId}'. Alleen letters/cijfers/-/_ toegestaan.`);\n}\n\nconst binaries = $binary || {};\nconst binKeys = Object.keys(binaries);\nlet binKey = ['file', 'template'].find((k) => binaries[k])\n  || (binKeys.length === 1 ? binKeys[0] : null);\nif (!binKey) {\n  binKey = binKeys.find((k) =>\n    String(binaries[k]?.fileName || '').toLowerCase().endsWith('.docx')\n  ) || null;\n}\nif (!binKey) {\n  throw new Error(\n    `Geen .docx-bestand gevonden in upload. Binary keys: ${binKeys.join(', ') || '(geen)'}.`\n  );\n}\nconst binEntry = binaries[binKey];\n\nconst originalName = String(binEntry.fileName || 'template.docx');\nif (!originalName.toLowerCase().endsWith('.docx')) {\n  throw new Error(`Alleen .docx-bestanden zijn toegestaan. Ontvangen: ${originalName}`);\n}\n\n// Sanitize filename \u2014 voorkom path traversal.\nconst safeName = path.basename(originalName).replace(/[^A-Za-z0-9._-]/g, '_');\nif (!safeName.toLowerCase().endsWith('.docx')) {\n  throw new Error(`Bestandsnaam niet bruikbaar na sanitization: '${safeName}'`);\n}\n\n// Lees registry, valideer bank.\nlet registry;\ntry {\n  registry = await readRegistry();\n} catch (err) {\n  const hint = err.code === 'EIO'\n    ? ' EIO op deze mount betekent bijna altijd dat macOS het bestand naar iCloud heeft weggeschreven; '\n      + 'open het \u00e9\u00e9n keer op de host of houd de projectmap lokaal gedownload.'\n    : '';\n  throw new Error(`Kon registry niet lezen na ${MAX_ATTEMPTS} pogingen: ${err.message}.${hint}`);\n}\nconst banks = registry.banks || {};\nif (!banks[bankId]) {\n  const known = Object.keys(banks).join(', ') || '(geen)';\n  throw new Error(\n    `Bank '${bankId}' is niet bekend in registry.json. ` +\n    `Bekende banken: ${known}. Vraag een ontwikkelaar deze toe te voegen.`\n  );\n}\n\n// n8n 2.x geeft via $binary alleen metadata; de inhoud staat los opgeslagen\n// (filesystem- of database-modus) en komt via de helper binnen. Zie ook de\n// transcript-bijlage in bespreking-workflow.json, die dezelfde weg gaat.\nlet buffer;\nif (typeof this?.helpers?.getBinaryDataBuffer === 'function') {\n  buffer = await this.helpers.getBinaryDataBuffer(0, binKey);\n} else if (binEntry.data) {\n  buffer = Buffer.from(binEntry.data, 'base64');\n} else {\n  throw new Error('Kon de inhoud van het geuploade bestand niet lezen.');\n}\nif (!buffer || !buffer.length) {\n  throw new Error('Het geuploade bestand is leeg.');\n}\n\n// Schrijf het bestand.\nconst targetDir = path.join(TEMPLATES_DIR, bankId);\nfs.mkdirSync(targetDir, { recursive: true });\nconst targetPath = path.join(targetDir, safeName);\nawait writeFileAtomic(targetPath, buffer);\n\n// Update registry.\nconst now = new Date().toISOString();\nbanks[bankId].template_filename = safeName;\nbanks[bankId].uploaded_at = now;\nbanks[bankId].uploaded_by = uploadedBy;\nawait writeFileAtomic(REGISTRY_PATH, JSON.stringify(registry, null, 2) + '\\n');\n\n// Houd de fallback-cache van 'Read Registry' in de pas, zodat een GET die\n// direct hierna op een mount-hik stuit niet de oude bestandsnaam toont.\nconst staticData = $getWorkflowStaticData('global');\nconst cached = staticData.templatesCache;\nif (cached && Array.isArray(cached.banks)) {\n  const entry = cached.banks.find((b) => b.bank_id === bankId);\n  if (entry) {\n    Object.assign(entry, {\n      template_filename: safeName,\n      uploaded_at: now,\n      uploaded_by: uploadedBy,\n      file_exists: true,\n      file_size: buffer.length,\n      file_mtime: now,\n    });\n    cached.cached_at = now;\n  }\n}\n\nreturn [{\n  json: {\n    success: true,\n    bank_id: bankId,\n    display_name: banks[bankId].display_name || bankId,\n    template_filename: safeName,\n    template_path: targetPath,\n    file_size: buffer.length,\n    uploaded_at: now,\n    uploaded_by: uploadedBy,\n  },\n}];"
       },
       "id": "5c4b9aaf-5555-4fa0-9aaa-templates0005",
       "name": "Save Uploaded Template",
@@ -108,6 +108,278 @@
       "position": [
         90,
         420
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "bespreeksjablonen",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "7c4b9aaf-7777-4fa0-9aaa-templates0007",
+      "name": "Webhook GET bespreeksjablonen",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        700
+      ],
+      "webhookId": "bespreeksjablonen-list-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst path = require('path');\nconst SJABLOON_DIR = '/data/shared/templates/besprekingen';\nconst VERSIE_DIR = `${SJABLOON_DIR}/.versies`;\nconst MAX_VERSIES = 20;\n\n// De map ligt op een Docker bind-mount naar de host. Zie 'Read Registry' voor\n// de achtergrond: een EIO hier betekent meestal dat macOS het bestand naar\n// iCloud heeft weggeschreven. Lezen en schrijven gaan daarom met retries, en\n// schrijven atomair.\nconst TRANSIENT = ['EIO', 'EBUSY', 'EAGAIN', 'ESTALE', 'ENOENT'];\nconst MAX_ATTEMPTS = 4;\n\nfunction sleep(ms) {\n  return new Promise((resolve) => setTimeout(resolve, ms));\n}\n\nfunction readFileFresh(filePath) {\n  const fd = fs.openSync(filePath, 'r');\n  try {\n    const size = fs.fstatSync(fd).size;\n    const buf = Buffer.alloc(size);\n    let offset = 0;\n    while (offset < size) {\n      const read = fs.readSync(fd, buf, offset, size - offset, offset);\n      if (read <= 0) break;\n      offset += read;\n    }\n    return buf.subarray(0, offset).toString('utf8');\n  } finally {\n    fs.closeSync(fd);\n  }\n}\n\nasync function readTextResilient(filePath) {\n  let lastErr;\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    try {\n      return readFileFresh(filePath);\n    } catch (err) {\n      lastErr = err;\n      if (!err.code || !TRANSIENT.includes(err.code)) break;\n      await sleep(attempt * 150);\n    }\n  }\n  throw lastErr;\n}\n\nasync function writeFileAtomic(target, data) {\n  let lastErr;\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    const tmp = `${target}.tmp-${Date.now()}-${attempt}`;\n    try {\n      fs.writeFileSync(tmp, data);\n      fs.renameSync(tmp, target);\n      return;\n    } catch (err) {\n      lastErr = err;\n      try { fs.unlinkSync(tmp); } catch { /* tmp bestond al niet */ }\n      if (!err.code || !TRANSIENT.includes(err.code)) break;\n      await sleep(attempt * 150);\n    }\n  }\n  throw lastErr;\n}\n\nfunction readdirSafe(dir) {\n  try {\n    return fs.readdirSync(dir);\n  } catch {\n    return [];\n  }\n}\n\nfunction statSafe(filePath) {\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    try {\n      return fs.statSync(filePath);\n    } catch (err) {\n      if (!err.code || !TRANSIENT.includes(err.code)) return null;\n    }\n  }\n  return null;\n}\n\n// ---------------------------------------------------------------------------\n// Overzicht van de bespreeksjablonen in shared/templates/besprekingen/.\n//\n// Anders dan de banktemplates is hier geen registry: de map \u00eds de bron. Elk\n// .json-bestand is \u00e9\u00e9n soort bespreking, en bespreking-workflow.json leest die\n// bestanden rechtstreeks \u2014 voor de soort-herkenning, de blok-samenvatting, de\n// verslagprompt en het ordenen van de secties. Dit endpoint levert de volledige\n// inhoud mee, zodat de editor in de webapp geen tweede aanroep nodig heeft.\n// ---------------------------------------------------------------------------\n\n// 'auto' en 'algemeen' betekenen in de workflow juist 'geen sjabloon'; ze mogen\n// dus nooit de naam van een sjabloonbestand worden.\nconst GERESERVEERD = ['auto', 'algemeen'];\n\nfunction versiesVan(soort) {\n  const dir = `${VERSIE_DIR}/${soort}`;\n  return readdirSafe(dir)\n    .filter((naam) => naam.endsWith('.json'))\n    .map((naam) => {\n      const stat = statSafe(`${dir}/${naam}`);\n      return {\n        versie_id: naam.replace(/\\.json$/, ''),\n        opgeslagen_op: stat ? stat.mtime.toISOString() : null,\n        grootte: stat ? stat.size : null,\n      };\n    })\n    .sort((a, b) => String(b.versie_id).localeCompare(String(a.versie_id)));\n}\n\nconst bestanden = readdirSafe(SJABLOON_DIR).filter((naam) => naam.endsWith('.json'));\n\nconst sjablonen = [];\nconst onleesbaar = [];\n\nfor (const bestand of bestanden) {\n  const pad = `${SJABLOON_DIR}/${bestand}`;\n  let sjabloon;\n  try {\n    sjabloon = JSON.parse(await readTextResilient(pad));\n  } catch (err) {\n    onleesbaar.push({ bestand, fout: err.message });\n    continue;\n  }\n\n  const soort = String(sjabloon.soort || bestand.replace(/\\.json$/, ''));\n  const stat = statSafe(pad);\n\n  // Het bespreekformulier waar het sjabloon van is afgeleid. Wordt door de\n  // workflow niet gelezen \u2014 het staat erbij zodat je de kopjes naast het\n  // origineel kunt leggen.\n  const bron = sjabloon.bron ? String(sjabloon.bron) : null;\n  const bronStat = bron ? statSafe(`${SJABLOON_DIR}/${bron}`) : null;\n\n  sjablonen.push({\n    soort,\n    naam: sjabloon.naam || soort,\n    bestand,\n    toelichting: sjabloon.toelichting || '',\n    herken_op: Array.isArray(sjabloon.herken_op) ? sjabloon.herken_op.map(String) : [],\n    secties: (Array.isArray(sjabloon.secties) ? sjabloon.secties : []).map((sec) => ({\n      kop: String(sec.kop || ''),\n      aanwijzing: String(sec.aanwijzing || ''),\n      trefwoorden: Array.isArray(sec.trefwoorden) ? sec.trefwoorden.map(String) : [],\n      altijd_nacontrole: Boolean(sec.altijd_nacontrole),\n    })),\n    bron,\n    bron_bestaat: Boolean(bronStat),\n    bron_grootte: bronStat ? bronStat.size : null,\n    gewijzigd_op: stat ? stat.mtime.toISOString() : null,\n    versies: versiesVan(soort),\n  });\n}\n\nsjablonen.sort((a, b) => a.naam.localeCompare(b.naam, 'nl'));\n\n// Soorten waarvan alleen nog versiehistorie over is: verwijderd, maar met\n// 'herstellen' terug te halen. Zonder dit zou een verwijderd sjabloon spoorloos\n// lijken terwijl het gewoon nog op schijf staat.\nconst actief = new Set(sjablonen.map((s) => s.soort));\nconst verwijderd = readdirSafe(VERSIE_DIR)\n  .filter((soort) => !actief.has(soort) && versiesVan(soort).length)\n  .map((soort) => ({ soort, versies: versiesVan(soort) }))\n  .sort((a, b) => a.soort.localeCompare(b.soort, 'nl'));\n\nreturn [{\n  json: {\n    success: true,\n    sjablonen,\n    verwijderd,\n    gereserveerde_soorten: GERESERVEERD,\n    // Bestanden die er wel staan maar niet te parsen zijn. Niet stilzwijgend\n    // weglaten: dan lijkt een sjabloon spoorloos terwijl het er gewoon staat.\n    onleesbaar,\n  },\n}];"
+      },
+      "id": "8c4b9aaf-8888-4fa0-9aaa-templates0008",
+      "name": "Read Bespreeksjablonen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -170,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "9c4b9aaf-9999-4fa0-9aaa-templates0009",
+      "name": "Respond Sjablonen GET",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        90,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bespreeksjabloon",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "ac4b9aaf-aaaa-4fa0-9aaa-templates0010",
+      "name": "Webhook POST bespreeksjabloon",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        980
+      ],
+      "webhookId": "bespreeksjabloon-save-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst path = require('path');\nconst SJABLOON_DIR = '/data/shared/templates/besprekingen';\nconst VERSIE_DIR = `${SJABLOON_DIR}/.versies`;\nconst MAX_VERSIES = 20;\n\n// De map ligt op een Docker bind-mount naar de host. Zie 'Read Registry' voor\n// de achtergrond: een EIO hier betekent meestal dat macOS het bestand naar\n// iCloud heeft weggeschreven. Lezen en schrijven gaan daarom met retries, en\n// schrijven atomair.\nconst TRANSIENT = ['EIO', 'EBUSY', 'EAGAIN', 'ESTALE', 'ENOENT'];\nconst MAX_ATTEMPTS = 4;\n\nfunction sleep(ms) {\n  return new Promise((resolve) => setTimeout(resolve, ms));\n}\n\nfunction readFileFresh(filePath) {\n  const fd = fs.openSync(filePath, 'r');\n  try {\n    const size = fs.fstatSync(fd).size;\n    const buf = Buffer.alloc(size);\n    let offset = 0;\n    while (offset < size) {\n      const read = fs.readSync(fd, buf, offset, size - offset, offset);\n      if (read <= 0) break;\n      offset += read;\n    }\n    return buf.subarray(0, offset).toString('utf8');\n  } finally {\n    fs.closeSync(fd);\n  }\n}\n\nasync function readTextResilient(filePath) {\n  let lastErr;\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    try {\n      return readFileFresh(filePath);\n    } catch (err) {\n      lastErr = err;\n      if (!err.code || !TRANSIENT.includes(err.code)) break;\n      await sleep(attempt * 150);\n    }\n  }\n  throw lastErr;\n}\n\nasync function writeFileAtomic(target, data) {\n  let lastErr;\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    const tmp = `${target}.tmp-${Date.now()}-${attempt}`;\n    try {\n      fs.writeFileSync(tmp, data);\n      fs.renameSync(tmp, target);\n      return;\n    } catch (err) {\n      lastErr = err;\n      try { fs.unlinkSync(tmp); } catch { /* tmp bestond al niet */ }\n      if (!err.code || !TRANSIENT.includes(err.code)) break;\n      await sleep(attempt * 150);\n    }\n  }\n  throw lastErr;\n}\n\nfunction readdirSafe(dir) {\n  try {\n    return fs.readdirSync(dir);\n  } catch {\n    return [];\n  }\n}\n\nfunction statSafe(filePath) {\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    try {\n      return fs.statSync(filePath);\n    } catch (err) {\n      if (!err.code || !TRANSIENT.includes(err.code)) return null;\n    }\n  }\n  return null;\n}\n\n// ---------------------------------------------------------------------------\n// Opslaan, aanmaken, verwijderen en terugdraaien van een bespreeksjabloon.\n//\n// Het sjabloon stuurt de hele verslaglegging aan: de 'aanwijzing' per sectie\n// gaat letterlijk de LLM-prompt in en de 'trefwoorden' doen de deterministische\n// voorselectie. Een kapot of half geschreven bestand maakt daarom elk verslag\n// van dat soort stiller slechter, zonder foutmelding. Vandaar: strak valideren\n// v\u00f3\u00f3r het schrijven, atomair schrijven, en de vorige versie altijd bewaren.\n//\n// Verwacht multipart-form-data met \u00e9\u00e9n veld 'payload' (JSON-tekst). Bewust\n// geen application/json: dat lokt een CORS-preflight uit vanaf de webapp op\n// een andere poort, en multipart is een 'simple request' die dat overslaat.\n// ---------------------------------------------------------------------------\n\nconst GERESERVEERD = ['auto', 'algemeen'];\nconst SOORT_PATROON = /^[a-z]{2,40}$/;\n\n// Verwachte fouten komen als { success: false, error } terug, niet als throw:\n// een throw in een Code node levert bij responseMode=responseNode een leeg\n// 200-antwoord op, en daar kan de webapp geen zinnige melding van maken.\nfunction mislukt(bericht) {\n  return [{ json: { success: false, error: bericht } }];\n}\n\nconst body = $json.body || $json || {};\nlet payload;\ntry {\n  payload = typeof body.payload === 'string' ? JSON.parse(body.payload) : (body.payload || body);\n} catch (err) {\n  return mislukt(`Kon payload niet lezen als JSON: ${err.message}`);\n}\n\nconst actie = String(payload.actie || 'opslaan');\n\nfunction bestandVan(soort) {\n  return `${SJABLOON_DIR}/${soort}.json`;\n}\n\n// Vorige versie wegschrijven v\u00f3\u00f3r we overschrijven, en de historie snoeien tot\n// de laatste MAX_VERSIES. Terugdraaien blijft daarmee mogelijk zonder dat de\n// map onbeperkt volloopt.\nasync function bewaarVersie(soort) {\n  const huidig = bestandVan(soort);\n  if (!statSafe(huidig)) return null;\n\n  let inhoud;\n  try {\n    inhoud = await readTextResilient(huidig);\n  } catch {\n    return null; // Niets te bewaren is geen reden om het opslaan te blokkeren.\n  }\n\n  const dir = `${VERSIE_DIR}/${soort}`;\n  fs.mkdirSync(dir, { recursive: true });\n  const versieId = new Date().toISOString().replace(/[:.]/g, '-');\n  await writeFileAtomic(`${dir}/${versieId}.json`, inhoud);\n\n  const oud = readdirSafe(dir)\n    .filter((n) => n.endsWith('.json'))\n    .sort()\n    .slice(0, -MAX_VERSIES);\n  for (const naam of oud) {\n    try { fs.unlinkSync(`${dir}/${naam}`); } catch { /* best effort */ }\n  }\n  return versieId;\n}\n\n// --- Terugdraaien naar een eerdere versie -----------------------------------\nif (actie === 'herstellen') {\n  const soort = String(payload.soort || '').trim().toLowerCase();\n  const versieId = String(payload.versie_id || '').trim();\n  if (!SOORT_PATROON.test(soort)) {\n    return mislukt(`Ongeldige soort: '${payload.soort || ''}'.`);\n  }\n  if (!/^[0-9A-Za-z_-]+$/.test(versieId)) {\n    return mislukt(`Ongeldig versie_id: '${versieId}'.`);\n  }\n  const versiePad = `${VERSIE_DIR}/${soort}/${versieId}.json`;\n  if (!statSafe(versiePad)) {\n    return mislukt(`Versie '${versieId}' van sjabloon '${soort}' bestaat niet.`);\n  }\n\n  const inhoud = await readTextResilient(versiePad);\n  JSON.parse(inhoud); // Nooit iets terugzetten dat zelf stuk is.\n  const bewaard = await bewaarVersie(soort);\n  await writeFileAtomic(bestandVan(soort), inhoud);\n\n  return [{\n    json: {\n      success: true,\n      actie: 'herstellen',\n      soort,\n      hersteld_naar: versieId,\n      vorige_versie_bewaard_als: bewaard,\n    },\n  }];\n}\n\n// --- Verwijderen ------------------------------------------------------------\nif (actie === 'verwijderen') {\n  const soort = String(payload.soort || '').trim().toLowerCase();\n  if (!SOORT_PATROON.test(soort)) {\n    return mislukt(`Ongeldige soort: '${payload.soort || ''}'.`);\n  }\n  const pad = bestandVan(soort);\n  if (!statSafe(pad)) {\n    return mislukt(`Sjabloon '${soort}' bestaat niet (meer).`);\n  }\n\n  // Eerst wegschrijven naar de versiehistorie, d\u00e1n pas het actieve bestand\n  // weghalen. De historie blijft staan, zodat een per ongeluk verwijderd\n  // sjabloon via 'herstellen' gewoon terugkomt \u2014 het overzicht toont ze onder\n  // 'Verwijderd'. De bron-.docx blijft eveneens staan: die kan bij een ander\n  // sjabloon in gebruik zijn, en een brondocument weggooien is niets voor een\n  // zijeffect van deze actie.\n  const bewaard = await bewaarVersie(soort);\n  if (!bewaard) {\n    return mislukt(\n      `Kon '${soort}' niet veiligstellen in de versiehistorie; daarom niet verwijderd.`\n    );\n  }\n  fs.unlinkSync(pad);\n\n  return [{\n    json: {\n      success: true,\n      actie: 'verwijderen',\n      soort,\n      bewaard_als: bewaard,\n    },\n  }];\n}\n\n// --- Opslaan (nieuw of gewijzigd) -------------------------------------------\nif (actie !== 'opslaan') {\n  return mislukt(\n    `Onbekende actie: '${actie}'. Verwacht 'opslaan', 'herstellen' of 'verwijderen'.`\n  );\n}\n\nconst sjabloon = payload.sjabloon || {};\nconst fouten = [];\n\nconst soort = String(sjabloon.soort || '').trim().toLowerCase();\nif (!SOORT_PATROON.test(soort)) {\n  // Letters-only is geen willekeur: bespreking-workflow.json normaliseert de\n  // soort met /[^a-z]/gi voordat het het bestand zoekt. Een soort met een cijfer\n  // of streepje zou daar stilzwijgend niet gevonden worden.\n  fouten.push(\n    `Soort '${sjabloon.soort || ''}' is ongeldig: gebruik 2 tot 40 kleine letters ` +\n    `zonder spaties, cijfers of leestekens (bijvoorbeeld 'schenking').`\n  );\n} else if (GERESERVEERD.includes(soort)) {\n  fouten.push(`Soort '${soort}' is gereserveerd: dat betekent in de workflow juist 'geen vaste indeling'.`);\n}\n\nconst naam = String(sjabloon.naam || '').trim();\nif (!naam) fouten.push('Naam is verplicht.');\nif (naam.length > 80) fouten.push('Naam mag hoogstens 80 tekens zijn.');\n\nconst toelichting = String(sjabloon.toelichting || '').trim();\nif (toelichting.length > 4000) fouten.push('Toelichting mag hoogstens 4000 tekens zijn.');\n\nconst herkenOp = (Array.isArray(sjabloon.herken_op) ? sjabloon.herken_op : [])\n  .map((w) => String(w).trim().toLowerCase())\n  .filter(Boolean);\nif (herkenOp.length > 30) fouten.push('Hoogstens 30 herkenwoorden.');\nif (new Set(herkenOp).size !== herkenOp.length) fouten.push('Herkenwoorden bevatten dubbelen.');\n\nconst secties = Array.isArray(sjabloon.secties) ? sjabloon.secties : [];\nif (!secties.length) fouten.push('Een sjabloon heeft minstens \u00e9\u00e9n sectie nodig.');\nif (secties.length > 60) fouten.push('Hoogstens 60 secties.');\n\nconst gezien = new Set();\nconst schoneSecties = secties.map((sec, i) => {\n  const kop = String(sec.kop || '').trim();\n  const nr = i + 1;\n  if (!kop) {\n    fouten.push(`Sectie ${nr} heeft geen kop.`);\n  } else if (kop.length > 100) {\n    fouten.push(`Kop van sectie ${nr} mag hoogstens 100 tekens zijn.`);\n  } else {\n    // Dubbele kopjes zijn funest: 'Orden Secties' verdeelt de punten op\n    // koptekst, dus bij twee gelijke kopjes belandt alles onder de eerste.\n    const sleutel = kop.toLowerCase();\n    if (gezien.has(sleutel)) fouten.push(`Kop '${kop}' komt meer dan \u00e9\u00e9n keer voor.`);\n    gezien.add(sleutel);\n  }\n\n  const aanwijzing = String(sec.aanwijzing || '').trim();\n  if (aanwijzing.length > 4000) fouten.push(`Aanwijzing van '${kop || nr}' mag hoogstens 4000 tekens zijn.`);\n\n  const trefwoorden = (Array.isArray(sec.trefwoorden) ? sec.trefwoorden : [])\n    .map((w) => String(w).trim().toLowerCase())\n    .filter(Boolean);\n  if (trefwoorden.length > 100) fouten.push(`Sectie '${kop || nr}' heeft meer dan 100 trefwoorden.`);\n\n  const schoon = { kop, aanwijzing, trefwoorden: [...new Set(trefwoorden)] };\n  if (sec.altijd_nacontrole) schoon.altijd_nacontrole = true;\n  return schoon;\n});\n\n// Bron-.docx: alleen een bestandsnaam binnen de sjabloonmap, nooit een pad.\nlet bron = null;\nif (sjabloon.bron) {\n  const kaal = path.basename(String(sjabloon.bron));\n  if (!kaal.toLowerCase().endsWith('.docx')) {\n    fouten.push(`Bron '${kaal}' is geen .docx-bestand.`);\n  } else {\n    bron = kaal;\n  }\n}\n\nif (fouten.length) {\n  return [{ json: { success: false, error: fouten.join(' '), fouten } }];\n}\n\nconst bestaatAl = Boolean(statSafe(bestandVan(soort)));\nif (payload.nieuw && bestaatAl) {\n  return [{\n    json: {\n      success: false,\n      error: `Er bestaat al een sjabloon met soort '${soort}'. Kies een andere soort of bewerk het bestaande.`,\n    },\n  }];\n}\n\n// Veldvolgorde gelijk houden aan de bestaande bestanden, zodat een diff in git\n// leesbaar blijft en niet elk veld van plek verspringt.\nconst uit = { soort, naam };\nif (bron) uit.bron = bron;\nuit.herken_op = herkenOp;\nif (toelichting) uit.toelichting = toelichting;\nuit.secties = schoneSecties;\n\nconst bewaard = await bewaarVersie(soort);\nfs.mkdirSync(SJABLOON_DIR, { recursive: true });\nawait writeFileAtomic(bestandVan(soort), JSON.stringify(uit, null, 2) + '\\n');\n\nreturn [{\n  json: {\n    success: true,\n    actie: 'opslaan',\n    soort,\n    naam,\n    nieuw: !bestaatAl,\n    secties_aantal: schoneSecties.length,\n    vorige_versie_bewaard_als: bewaard,\n    // Geen blokkerende fout, wel het melden waard: zonder aanwijzing krijgt het\n    // model niets mee over wat er onder het kopje hoort.\n    waarschuwingen: schoneSecties\n      .filter((s) => !s.aanwijzing)\n      .map((s) => `Sectie '${s.kop}' heeft geen aanwijzing; het model krijgt dan alleen de kop als houvast.`),\n  },\n}];"
+      },
+      "id": "bc4b9aaf-bbbb-4fa0-9aaa-templates0011",
+      "name": "Save Bespreeksjabloon",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -170,
+        980
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "cc4b9aaf-cccc-4fa0-9aaa-templates0012",
+      "name": "Respond Sjabloon POST",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        90,
+        980
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "upload-bespreekformulier",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "dc4b9aaf-dddd-4fa0-9aaa-templates0013",
+      "name": "Webhook POST bespreekformulier",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        1260
+      ],
+      "webhookId": "bespreekformulier-upload-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst path = require('path');\nconst SJABLOON_DIR = '/data/shared/templates/besprekingen';\nconst VERSIE_DIR = `${SJABLOON_DIR}/.versies`;\nconst MAX_VERSIES = 20;\n\n// De map ligt op een Docker bind-mount naar de host. Zie 'Read Registry' voor\n// de achtergrond: een EIO hier betekent meestal dat macOS het bestand naar\n// iCloud heeft weggeschreven. Lezen en schrijven gaan daarom met retries, en\n// schrijven atomair.\nconst TRANSIENT = ['EIO', 'EBUSY', 'EAGAIN', 'ESTALE', 'ENOENT'];\nconst MAX_ATTEMPTS = 4;\n\nfunction sleep(ms) {\n  return new Promise((resolve) => setTimeout(resolve, ms));\n}\n\nfunction readFileFresh(filePath) {\n  const fd = fs.openSync(filePath, 'r');\n  try {\n    const size = fs.fstatSync(fd).size;\n    const buf = Buffer.alloc(size);\n    let offset = 0;\n    while (offset < size) {\n      const read = fs.readSync(fd, buf, offset, size - offset, offset);\n      if (read <= 0) break;\n      offset += read;\n    }\n    return buf.subarray(0, offset).toString('utf8');\n  } finally {\n    fs.closeSync(fd);\n  }\n}\n\nasync function readTextResilient(filePath) {\n  let lastErr;\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    try {\n      return readFileFresh(filePath);\n    } catch (err) {\n      lastErr = err;\n      if (!err.code || !TRANSIENT.includes(err.code)) break;\n      await sleep(attempt * 150);\n    }\n  }\n  throw lastErr;\n}\n\nasync function writeFileAtomic(target, data) {\n  let lastErr;\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    const tmp = `${target}.tmp-${Date.now()}-${attempt}`;\n    try {\n      fs.writeFileSync(tmp, data);\n      fs.renameSync(tmp, target);\n      return;\n    } catch (err) {\n      lastErr = err;\n      try { fs.unlinkSync(tmp); } catch { /* tmp bestond al niet */ }\n      if (!err.code || !TRANSIENT.includes(err.code)) break;\n      await sleep(attempt * 150);\n    }\n  }\n  throw lastErr;\n}\n\nfunction readdirSafe(dir) {\n  try {\n    return fs.readdirSync(dir);\n  } catch {\n    return [];\n  }\n}\n\nfunction statSafe(filePath) {\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    try {\n      return fs.statSync(filePath);\n    } catch (err) {\n      if (!err.code || !TRANSIENT.includes(err.code)) return null;\n    }\n  }\n  return null;\n}\n\n// ---------------------------------------------------------------------------\n// Uploaden van het papieren bespreekformulier waar een sjabloon van is afgeleid.\n//\n// De workflow doet niets met dit bestand \u2014 het staat er zodat de behandelaar de\n// kopjes in de editor naast het origineel kan leggen. Het sjabloon verwijst\n// ernaar met het veld 'bron'; dat wordt hier meteen bijgewerkt.\n// ---------------------------------------------------------------------------\n\nconst SOORT_PATROON = /^[a-z]{2,40}$/;\n\n// Verwachte fouten als data terug, niet als throw: een throw in een Code node\n// levert bij responseMode=responseNode een leeg 200-antwoord op.\nfunction mislukt(bericht) {\n  return [{ json: { success: false, error: bericht } }];\n}\n\nconst body = $json.body || $json || {};\nconst soort = String(body.soort || '').trim().toLowerCase();\nif (!SOORT_PATROON.test(soort)) {\n  return mislukt(`Ongeldige soort: '${body.soort || ''}'.`);\n}\n\nconst sjabloonPad = `${SJABLOON_DIR}/${soort}.json`;\nif (!statSafe(sjabloonPad)) {\n  return mislukt(`Sjabloon '${soort}' bestaat niet; sla het eerst op.`);\n}\n\nconst binaries = $binary || {};\nconst binKeys = Object.keys(binaries);\nlet binKey = binaries.file ? 'file' : (binKeys.length === 1 ? binKeys[0] : null);\nif (!binKey) {\n  binKey = binKeys.find((k) =>\n    String(binaries[k]?.fileName || '').toLowerCase().endsWith('.docx')\n  ) || null;\n}\nif (!binKey) {\n  return mislukt(`Geen .docx-bestand gevonden in upload. Binary keys: ${binKeys.join(', ') || '(geen)'}.`);\n}\nconst binEntry = binaries[binKey];\n\nconst originalName = String(binEntry.fileName || 'bespreekformulier.docx');\nif (!originalName.toLowerCase().endsWith('.docx')) {\n  return mislukt(`Alleen .docx-bestanden zijn toegestaan. Ontvangen: ${originalName}`);\n}\n\n// Sanitize \u2014 voorkom path traversal.\nconst safeName = path.basename(originalName).replace(/[^A-Za-z0-9._ -]/g, '_').trim();\nif (!safeName.toLowerCase().endsWith('.docx')) {\n  return mislukt(`Bestandsnaam niet bruikbaar na sanitization: '${safeName}'`);\n}\n\n// n8n 2.x geeft via $binary alleen metadata; de inhoud staat los opgeslagen\n// (filesystem- of database-modus) en komt via de helper binnen. Zie ook de\n// transcript-bijlage in bespreking-workflow.json, die dezelfde weg gaat.\nlet buffer;\nif (typeof this?.helpers?.getBinaryDataBuffer === 'function') {\n  buffer = await this.helpers.getBinaryDataBuffer(0, binKey);\n} else if (binEntry.data) {\n  buffer = Buffer.from(binEntry.data, 'base64');\n} else {\n  return mislukt('Kon de inhoud van het geuploade bestand niet lezen.');\n}\nif (!buffer || !buffer.length) {\n  return mislukt('Het geuploade bestand is leeg.');\n}\n\nawait writeFileAtomic(`${SJABLOON_DIR}/${safeName}`, buffer);\n\n// Sjabloon naar het nieuwe bestand laten wijzen. De oude bron blijft staan:\n// hij kan bij een ander sjabloon in gebruik zijn, en weggooien van een\n// brondocument is niets voor een zijeffect van een upload.\nconst sjabloon = JSON.parse(await readTextResilient(sjabloonPad));\nconst vorigeBron = sjabloon.bron || null;\nsjabloon.bron = safeName;\nawait writeFileAtomic(sjabloonPad, JSON.stringify(sjabloon, null, 2) + '\\n');\n\nreturn [{\n  json: {\n    success: true,\n    soort,\n    bron: safeName,\n    vorige_bron: vorigeBron,\n    file_size: buffer.length,\n  },\n}];"
+      },
+      "id": "ec4b9aaf-eeee-4fa0-9aaa-templates0014",
+      "name": "Save Bespreekformulier",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -170,
+        1260
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "fc4b9aaf-ffff-4fa0-9aaa-templates0015",
+      "name": "Respond Bespreekformulier",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        90,
+        1260
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "akteblokken",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "1d4b9aaf-1111-4fa0-9aaa-akteblok00001",
+      "name": "Webhook GET akteblokken",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        1540
+      ],
+      "webhookId": "akteblokken-list-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst AKTE_DIR = '/data/shared/templates/aktes';\nconst VERSIE_DIR = `${AKTE_DIR}/.versies`;\nconst MAX_VERSIES = 20;\n\n// De map ligt op een Docker bind-mount naar de host. Zie 'Read Registry' voor\n// de achtergrond: een EIO hier betekent meestal dat macOS het bestand naar\n// iCloud heeft weggeschreven. Lezen en schrijven gaan daarom met retries, en\n// schrijven atomair.\nconst TRANSIENT = ['EIO', 'EBUSY', 'EAGAIN', 'ESTALE', 'ENOENT'];\nconst MAX_ATTEMPTS = 4;\n\nfunction sleep(ms) {\n  return new Promise((resolve) => setTimeout(resolve, ms));\n}\n\nfunction readFileFresh(filePath) {\n  const fd = fs.openSync(filePath, 'r');\n  try {\n    const size = fs.fstatSync(fd).size;\n    const buf = Buffer.alloc(size);\n    let offset = 0;\n    while (offset < size) {\n      const read = fs.readSync(fd, buf, offset, size - offset, offset);\n      if (read <= 0) break;\n      offset += read;\n    }\n    return buf.subarray(0, offset).toString('utf8');\n  } finally {\n    fs.closeSync(fd);\n  }\n}\n\nasync function readTextResilient(filePath) {\n  let lastErr;\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    try {\n      return readFileFresh(filePath);\n    } catch (err) {\n      lastErr = err;\n      if (!err.code || !TRANSIENT.includes(err.code)) break;\n      await sleep(attempt * 150);\n    }\n  }\n  throw lastErr;\n}\n\nasync function writeFileAtomic(target, data) {\n  let lastErr;\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    const tmp = `${target}.tmp-${Date.now()}-${attempt}`;\n    try {\n      fs.writeFileSync(tmp, data);\n      fs.renameSync(tmp, target);\n      return;\n    } catch (err) {\n      lastErr = err;\n      try { fs.unlinkSync(tmp); } catch { /* tmp bestond al niet */ }\n      if (!err.code || !TRANSIENT.includes(err.code)) break;\n      await sleep(attempt * 150);\n    }\n  }\n  throw lastErr;\n}\n\nfunction readdirSafe(dir) {\n  try {\n    return fs.readdirSync(dir);\n  } catch {\n    return [];\n  }\n}\n\nfunction statSafe(filePath) {\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    try {\n      return fs.statSync(filePath);\n    } catch (err) {\n      if (!err.code || !TRANSIENT.includes(err.code)) return null;\n    }\n  }\n  return null;\n}\n\n// Placeholders die de generator zelf invult uit kantoor.json en de\n// cli\u00ebntgegevens; die hoeven niet als invulveld op een blok te staan.\nconst SYSTEEM_PLACEHOLDERS = [\n  '<<AKTE_DATUM>>',\n  '<<NOTARIS_NAAM>>',\n  '<<NOTARIS_STANDPLAATS>>',\n  '<<ERFLATERS>>',\n  '<<SLOT_TEKST>>',\n];\n\nfunction placeholdersIn(tekst) {\n  return String(tekst || '').match(/<<[A-Z0-9_]+>>/g) || [];\n}\n\n// ---------------------------------------------------------------------------\n// Overzicht van de akteblokken in shared/templates/aktes/.\n//\n// E\u00e9n .json-bestand per aktesoort. Elk blok hangt via `kop` aan een kopje uit\n// het bijbehorende bespreeksjabloon; kwam er in de bespreking inhoud onder dat\n// kopje, dan stelt de bouwer het blok voor. `kop: null` met `altijd: true` zijn\n// de vaste blokken (aanhef, slotformule) die er altijd in gaan.\n//\n// De volledige inhoud gaat mee, zodat zowel de editor als de testament-bouwer\n// aan \u00e9\u00e9n aanroep genoeg heeft. Bedragen blijven in centen; de webapp rekent ze\n// om naar euro's.\n// ---------------------------------------------------------------------------\n\nconst BESPREKING_DIR = '/data/shared/templates/besprekingen';\n\nfunction versiesVan(soort) {\n  const dir = `${VERSIE_DIR}/${soort}`;\n  return readdirSafe(dir)\n    .filter((naam) => naam.endsWith('.json'))\n    .map((naam) => {\n      const stat = statSafe(`${dir}/${naam}`);\n      return {\n        versie_id: naam.replace(/\\.json$/, ''),\n        opgeslagen_op: stat ? stat.mtime.toISOString() : null,\n        grootte: stat ? stat.size : null,\n      };\n    })\n    .sort((a, b) => String(b.versie_id).localeCompare(String(a.versie_id)));\n}\n\nfunction centen(waarde) {\n  const n = Math.round(Number(waarde));\n  return Number.isFinite(n) && n >= 0 ? n : 0;\n}\n\n// De koppen van het gekoppelde bespreeksjabloon. Nodig voor de kruiscontrole\n// hieronder: hernoemt iemand een kopje in het bespreeksjabloon, dan wordt het\n// bijbehorende akteblok stilzwijgend nooit meer voorgesteld. Dat moet zichtbaar\n// zijn in het beheerscherm, niet pas als er een clausule ontbreekt in een akte.\nasync function koppenVan(sjabloonSoort) {\n  if (!sjabloonSoort || !/^[a-z]{2,40}$/.test(sjabloonSoort)) return [];\n  try {\n    const sj = JSON.parse(await readTextResilient(`${BESPREKING_DIR}/${sjabloonSoort}.json`));\n    return (Array.isArray(sj.secties) ? sj.secties : []).map((s) => String(s.kop || ''));\n  } catch {\n    return [];\n  }\n}\n\nconst bestanden = readdirSafe(AKTE_DIR).filter((naam) => naam.endsWith('.json'));\n\nconst aktes = [];\nconst onleesbaar = [];\n\nfor (const bestand of bestanden) {\n  const pad = `${AKTE_DIR}/${bestand}`;\n  let bron;\n  try {\n    bron = JSON.parse(await readTextResilient(pad));\n  } catch (err) {\n    onleesbaar.push({ bestand, fout: err.message });\n    continue;\n  }\n\n  const soort = String(bron.soort || bestand.replace(/\\.json$/, ''));\n  const stat = statSafe(pad);\n  const sjabloonSoort = bron.bespreeksjabloon ? String(bron.bespreeksjabloon) : null;\n  const bekendeKoppen = await koppenVan(sjabloonSoort);\n  const koppenSet = new Set(bekendeKoppen);\n\n  const blokken = (Array.isArray(bron.blokken) ? bron.blokken : []).map((b) => {\n    const velden = (Array.isArray(b.velden) ? b.velden : []).map((v) => ({\n      naam: String(v.naam || ''),\n      label: String(v.label || v.naam || ''),\n      hint: String(v.hint || ''),\n    }));\n    // Een placeholder die nergens als invulveld staat en ook geen systeemveld\n    // is, blijft in de akte letterlijk als <<TYPFOUT>> staan. Dat is stil en\n    // vervelend, dus het overzicht meldt het. Andersom ook: een veld dat in de\n    // tekst niet voorkomt, vraagt de gebruiker om iets in te vullen dat nergens\n    // terechtkomt.\n    const gedeclareerd = new Set([\n      ...velden.map((v) => `<<${v.naam}>>`),\n      ...SYSTEEM_PLACEHOLDERS,\n    ]);\n    const inTekst = [...new Set(placeholdersIn(b.tekst))];\n    const kop = b.kop == null ? null : String(b.kop);\n    return {\n      id: String(b.id || ''),\n      naam: String(b.naam || b.id || ''),\n      kop,\n      // null-kop is bewust losgekoppeld (aanhef, slot) en dus altijd in orde;\n      // zonder bespreeksjabloon valt er niets te controleren.\n      kop_bestaat: kop === null || !bekendeKoppen.length ? true : koppenSet.has(kop),\n      altijd: Boolean(b.altijd),\n      prijs_cent: centen(b.prijs_cent),\n      tekst: String(b.tekst || ''),\n      velden,\n      onbekende_placeholders: inTekst.filter((p) => !gedeclareerd.has(p)),\n      ongebruikte_velden: velden\n        .map((v) => `<<${v.naam}>>`)\n        .filter((p) => !inTekst.includes(p)),\n    };\n  });\n\n  aktes.push({\n    soort,\n    naam: bron.naam || soort,\n    bestand,\n    bespreeksjabloon: sjabloonSoort,\n    bekende_koppen: bekendeKoppen,\n    basistarief_cent: centen(bron.basistarief_cent),\n    tarief_tweede_testament_cent: centen(bron.tarief_tweede_testament_cent),\n    verschotten: (Array.isArray(bron.verschotten) ? bron.verschotten : []).map((v) => ({\n      naam: String(v.naam || ''),\n      bedrag_cent: centen(v.bedrag_cent),\n      per_testament: Boolean(v.per_testament),\n    })),\n    blokken,\n    gewijzigd_op: stat ? stat.mtime.toISOString() : null,\n    versies: versiesVan(soort),\n  });\n}\n\naktes.sort((a, b) => a.naam.localeCompare(b.naam, 'nl'));\n\n// Soorten waarvan alleen nog versiehistorie over is: verwijderd, maar met\n// 'herstellen' terug te halen.\nconst actief = new Set(aktes.map((a) => a.soort));\nconst verwijderd = readdirSafe(VERSIE_DIR)\n  .filter((soort) => !actief.has(soort) && versiesVan(soort).length)\n  .map((soort) => ({ soort, versies: versiesVan(soort) }))\n  .sort((a, b) => a.soort.localeCompare(b.soort, 'nl'));\n\nreturn [{\n  json: {\n    success: true,\n    aktes,\n    verwijderd,\n    systeem_placeholders: SYSTEEM_PLACEHOLDERS,\n    onleesbaar,\n  },\n}];"
+      },
+      "id": "2d4b9aaf-2222-4fa0-9aaa-akteblok00002",
+      "name": "Read Akteblokken",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -170,
+        1540
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "3d4b9aaf-3333-4fa0-9aaa-akteblok00003",
+      "name": "Respond Akteblokken GET",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        90,
+        1540
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "akteblok",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "4d4b9aaf-4444-4fa0-9aaa-akteblok00004",
+      "name": "Webhook POST akteblok",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        1820
+      ],
+      "webhookId": "akteblok-save-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst AKTE_DIR = '/data/shared/templates/aktes';\nconst VERSIE_DIR = `${AKTE_DIR}/.versies`;\nconst MAX_VERSIES = 20;\n\n// De map ligt op een Docker bind-mount naar de host. Zie 'Read Registry' voor\n// de achtergrond: een EIO hier betekent meestal dat macOS het bestand naar\n// iCloud heeft weggeschreven. Lezen en schrijven gaan daarom met retries, en\n// schrijven atomair.\nconst TRANSIENT = ['EIO', 'EBUSY', 'EAGAIN', 'ESTALE', 'ENOENT'];\nconst MAX_ATTEMPTS = 4;\n\nfunction sleep(ms) {\n  return new Promise((resolve) => setTimeout(resolve, ms));\n}\n\nfunction readFileFresh(filePath) {\n  const fd = fs.openSync(filePath, 'r');\n  try {\n    const size = fs.fstatSync(fd).size;\n    const buf = Buffer.alloc(size);\n    let offset = 0;\n    while (offset < size) {\n      const read = fs.readSync(fd, buf, offset, size - offset, offset);\n      if (read <= 0) break;\n      offset += read;\n    }\n    return buf.subarray(0, offset).toString('utf8');\n  } finally {\n    fs.closeSync(fd);\n  }\n}\n\nasync function readTextResilient(filePath) {\n  let lastErr;\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    try {\n      return readFileFresh(filePath);\n    } catch (err) {\n      lastErr = err;\n      if (!err.code || !TRANSIENT.includes(err.code)) break;\n      await sleep(attempt * 150);\n    }\n  }\n  throw lastErr;\n}\n\nasync function writeFileAtomic(target, data) {\n  let lastErr;\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    const tmp = `${target}.tmp-${Date.now()}-${attempt}`;\n    try {\n      fs.writeFileSync(tmp, data);\n      fs.renameSync(tmp, target);\n      return;\n    } catch (err) {\n      lastErr = err;\n      try { fs.unlinkSync(tmp); } catch { /* tmp bestond al niet */ }\n      if (!err.code || !TRANSIENT.includes(err.code)) break;\n      await sleep(attempt * 150);\n    }\n  }\n  throw lastErr;\n}\n\nfunction readdirSafe(dir) {\n  try {\n    return fs.readdirSync(dir);\n  } catch {\n    return [];\n  }\n}\n\nfunction statSafe(filePath) {\n  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {\n    try {\n      return fs.statSync(filePath);\n    } catch (err) {\n      if (!err.code || !TRANSIENT.includes(err.code)) return null;\n    }\n  }\n  return null;\n}\n\n// Placeholders die de generator zelf invult uit kantoor.json en de\n// cli\u00ebntgegevens; die hoeven niet als invulveld op een blok te staan.\nconst SYSTEEM_PLACEHOLDERS = [\n  '<<AKTE_DATUM>>',\n  '<<NOTARIS_NAAM>>',\n  '<<NOTARIS_STANDPLAATS>>',\n  '<<ERFLATERS>>',\n  '<<SLOT_TEKST>>',\n];\n\nfunction placeholdersIn(tekst) {\n  return String(tekst || '').match(/<<[A-Z0-9_]+>>/g) || [];\n}\n\n// ---------------------------------------------------------------------------\n// Opslaan, aanmaken, verwijderen en terugdraaien van een akteblokken-bestand.\n//\n// Deze blokken vormen letterlijk de tekst van een concept-akte en bepalen de\n// offerte. Een kapot bestand levert dus een onbruikbaar dossierstuk \u00e9n een\n// verkeerd bedrag op. Vandaar: strak valideren v\u00f3\u00f3r het schrijven, atomair\n// schrijven, en bij elke wijziging de vorige versie bewaren.\n//\n// Verwacht multipart-form-data met \u00e9\u00e9n veld 'payload' (JSON-tekst). Bewust\n// geen application/json: dat lokt een CORS-preflight uit vanaf de webapp.\n// ---------------------------------------------------------------------------\n\nconst SOORT_PATROON = /^[a-z]{2,40}$/;\nconst BLOK_ID_PATROON = /^[a-z0-9][a-z0-9-]{0,59}$/;\nconst VELD_PATROON = /^[A-Z][A-Z0-9_]{0,59}$/;\n\n// Verwachte fouten komen als { success: false, error } terug, niet als throw:\n// een throw in een Code node levert bij responseMode=responseNode een leeg\n// 200-antwoord op, en daar kan de webapp geen zinnige melding van maken.\nfunction mislukt(bericht, extra) {\n  return [{ json: { success: false, error: bericht, ...(extra || {}) } }];\n}\n\nconst body = $json.body || $json || {};\nlet payload;\ntry {\n  payload = typeof body.payload === 'string' ? JSON.parse(body.payload) : (body.payload || body);\n} catch (err) {\n  return mislukt(`Kon payload niet lezen als JSON: ${err.message}`);\n}\n\nconst actie = String(payload.actie || 'opslaan');\n\nfunction bestandVan(soort) {\n  return `${AKTE_DIR}/${soort}.json`;\n}\n\nasync function bewaarVersie(soort) {\n  const huidig = bestandVan(soort);\n  if (!statSafe(huidig)) return null;\n\n  let inhoud;\n  try {\n    inhoud = await readTextResilient(huidig);\n  } catch {\n    return null; // Niets te bewaren is geen reden om het opslaan te blokkeren.\n  }\n\n  const dir = `${VERSIE_DIR}/${soort}`;\n  fs.mkdirSync(dir, { recursive: true });\n  const versieId = new Date().toISOString().replace(/[:.]/g, '-');\n  await writeFileAtomic(`${dir}/${versieId}.json`, inhoud);\n\n  const oud = readdirSafe(dir)\n    .filter((n) => n.endsWith('.json'))\n    .sort()\n    .slice(0, -MAX_VERSIES);\n  for (const naam of oud) {\n    try { fs.unlinkSync(`${dir}/${naam}`); } catch { /* best effort */ }\n  }\n  return versieId;\n}\n\n// --- Terugdraaien naar een eerdere versie -----------------------------------\nif (actie === 'herstellen') {\n  const soort = String(payload.soort || '').trim().toLowerCase();\n  const versieId = String(payload.versie_id || '').trim();\n  if (!SOORT_PATROON.test(soort)) {\n    return mislukt(`Ongeldige soort: '${payload.soort || ''}'.`);\n  }\n  if (!/^[0-9A-Za-z_-]+$/.test(versieId)) {\n    return mislukt(`Ongeldig versie_id: '${versieId}'.`);\n  }\n  const versiePad = `${VERSIE_DIR}/${soort}/${versieId}.json`;\n  if (!statSafe(versiePad)) {\n    return mislukt(`Versie '${versieId}' van aktesoort '${soort}' bestaat niet.`);\n  }\n\n  const inhoud = await readTextResilient(versiePad);\n  JSON.parse(inhoud); // Nooit iets terugzetten dat zelf stuk is.\n  const bewaard = await bewaarVersie(soort);\n  fs.mkdirSync(AKTE_DIR, { recursive: true });\n  await writeFileAtomic(bestandVan(soort), inhoud);\n\n  return [{\n    json: {\n      success: true,\n      actie: 'herstellen',\n      soort,\n      hersteld_naar: versieId,\n      vorige_versie_bewaard_als: bewaard,\n    },\n  }];\n}\n\n// --- Verwijderen ------------------------------------------------------------\nif (actie === 'verwijderen') {\n  const soort = String(payload.soort || '').trim().toLowerCase();\n  if (!SOORT_PATROON.test(soort)) {\n    return mislukt(`Ongeldige soort: '${payload.soort || ''}'.`);\n  }\n  const pad = bestandVan(soort);\n  if (!statSafe(pad)) {\n    return mislukt(`Aktesoort '${soort}' bestaat niet (meer).`);\n  }\n  const bewaard = await bewaarVersie(soort);\n  if (!bewaard) {\n    return mislukt(\n      `Kon '${soort}' niet veiligstellen in de versiehistorie; daarom niet verwijderd.`\n    );\n  }\n  fs.unlinkSync(pad);\n\n  return [{ json: { success: true, actie: 'verwijderen', soort, bewaard_als: bewaard } }];\n}\n\n// --- Opslaan (nieuw of gewijzigd) -------------------------------------------\nif (actie !== 'opslaan') {\n  return mislukt(\n    `Onbekende actie: '${actie}'. Verwacht 'opslaan', 'herstellen' of 'verwijderen'.`\n  );\n}\n\nconst akte = payload.akte || {};\nconst fouten = [];\n\n// Bedragen komen en gaan in hele centen. Optellen van euro's als kommagetallen\n// geeft 562.0000000001, en bij 21% BTW wordt dat zichtbaar op de offerte.\nfunction centen(waarde, naam, standaard) {\n  if (waarde === undefined || waarde === null || waarde === '') return standaard;\n  const n = Number(waarde);\n  if (!Number.isFinite(n) || n < 0) {\n    fouten.push(`${naam} moet een bedrag van 0 of hoger zijn (kreeg '${waarde}').`);\n    return standaard;\n  }\n  if (!Number.isInteger(n)) {\n    fouten.push(`${naam} moet een heel aantal centen zijn (kreeg '${waarde}').`);\n    return standaard;\n  }\n  if (n > 100000000) {\n    fouten.push(`${naam} is onwaarschijnlijk hoog (meer dan een miljoen euro).`);\n    return standaard;\n  }\n  return n;\n}\n\nconst soort = String(akte.soort || '').trim().toLowerCase();\nif (!SOORT_PATROON.test(soort)) {\n  fouten.push(\n    `Soort '${akte.soort || ''}' is ongeldig: gebruik 2 tot 40 kleine letters zonder ` +\n    `spaties, cijfers of leestekens (bijvoorbeeld 'testament').`\n  );\n}\n\nconst naam = String(akte.naam || '').trim();\nif (!naam) fouten.push('Naam is verplicht.');\nif (naam.length > 80) fouten.push('Naam mag hoogstens 80 tekens zijn.');\n\nconst basistarief = centen(akte.basistarief_cent, 'Basistarief', 0);\nconst tariefTweede = centen(akte.tarief_tweede_testament_cent, 'Tarief tweede testament', 0);\n\nconst verschotten = (Array.isArray(akte.verschotten) ? akte.verschotten : []).map((v, i) => {\n  const vNaam = String(v.naam || '').trim();\n  if (!vNaam) fouten.push(`Verschot ${i + 1} heeft geen omschrijving.`);\n  return {\n    naam: vNaam,\n    bedrag_cent: centen(v.bedrag_cent, `Bedrag van verschot '${vNaam || i + 1}'`, 0),\n    per_testament: Boolean(v.per_testament),\n  };\n});\n\nconst blokken = Array.isArray(akte.blokken) ? akte.blokken : [];\nif (!blokken.length) fouten.push('Een aktesoort heeft minstens \u00e9\u00e9n blok nodig.');\nif (blokken.length > 100) fouten.push('Hoogstens 100 blokken.');\n\nconst gezienId = new Set();\nconst schoneBlokken = blokken.map((b, i) => {\n  const nr = i + 1;\n  const id = String(b.id || '').trim().toLowerCase();\n  if (!BLOK_ID_PATROON.test(id)) {\n    fouten.push(\n      `Blok ${nr} heeft een ongeldig id ('${b.id || ''}'): kleine letters, cijfers en ` +\n      `koppeltekens, beginnend met een letter of cijfer.`\n    );\n  } else if (gezienId.has(id)) {\n    // Dubbele id's maken het onmogelijk om een blok aan te vinken zonder ook\n    // het andere te raken; de bouwer sleutelt erop.\n    fouten.push(`Blok-id '${id}' komt meer dan \u00e9\u00e9n keer voor.`);\n  } else {\n    gezienId.add(id);\n  }\n\n  const bNaam = String(b.naam || '').trim();\n  if (!bNaam) fouten.push(`Blok ${nr} heeft geen naam.`);\n  // Een naamloos blok aanduiden als \"blok '3'\" leest verkeerd; dan liever het\n  // volgnummer zonder aanhalingstekens.\n  const label = bNaam ? `'${bNaam}'` : `${nr}`;\n\n  const tekst = String(b.tekst || '').trim();\n  if (!tekst) fouten.push(`Blok ${label} heeft geen tekst.`);\n  if (tekst.length > 20000) fouten.push(`Tekst van blok ${label} is te lang.`);\n\n  const gezienVeld = new Set();\n  const velden = (Array.isArray(b.velden) ? b.velden : []).map((v, vi) => {\n    const vNaam = String(v.naam || '').trim().toUpperCase();\n    if (!VELD_PATROON.test(vNaam)) {\n      fouten.push(\n        `Veld ${vi + 1} van blok ${label} heeft een ongeldige naam ('${v.naam || ''}'): ` +\n        `hoofdletters, cijfers en liggende streepjes, beginnend met een letter.`\n      );\n    } else if (gezienVeld.has(vNaam)) {\n      fouten.push(`Veld '${vNaam}' komt meer dan \u00e9\u00e9n keer voor in blok ${label}.`);\n    } else {\n      gezienVeld.add(vNaam);\n    }\n    return {\n      naam: vNaam,\n      label: String(v.label || vNaam).trim(),\n      hint: String(v.hint || '').trim(),\n    };\n  });\n\n  return {\n    id,\n    naam: bNaam,\n    kop: b.kop == null || String(b.kop).trim() === '' ? null : String(b.kop).trim(),\n    altijd: Boolean(b.altijd),\n    prijs_cent: centen(b.prijs_cent, `Prijs van blok ${label}`, 0),\n    tekst,\n    velden,\n  };\n});\n\nif (fouten.length) {\n  return mislukt(fouten.join(' '), { fouten });\n}\n\nconst bestaatAl = Boolean(statSafe(bestandVan(soort)));\nif (payload.nieuw && bestaatAl) {\n  return mislukt(\n    `Er bestaat al een aktesoort '${soort}'. Kies een andere soort of bewerk de bestaande.`\n  );\n}\n\n// Twee schermen bewerken dit bestand: Akteblokken gaat over de tekst, het\n// tarievenscherm over het geld. Zonder scheiding zou het opslaan van een\n// tekstwijziging een tariefwijziging van een minuut eerder terugdraaien, want\n// beide schermen sturen het hele object mee. `bereik` bepaalt daarom welk deel\n// van de payload leidend is; de rest komt van schijf.\nconst bereik = String(payload.bereik || 'alles');\nif (!['alles', 'blokken', 'tarieven'].includes(bereik)) {\n  return mislukt(`Onbekend bereik: '${bereik}'. Verwacht 'blokken', 'tarieven' of 'alles'.`);\n}\n\nlet huidig = null;\nif (bestaatAl) {\n  try {\n    huidig = JSON.parse(await readTextResilient(bestandVan(soort)));\n  } catch { /* niets over te nemen */ }\n}\nif (bereik !== 'alles' && !huidig) {\n  return mislukt(\n    `Aktesoort '${soort}' bestaat nog niet; een nieuwe soort moet in \u00e9\u00e9n keer worden aangemaakt.`\n  );\n}\n\nlet uitBasistarief = basistarief;\nlet uitTariefTweede = tariefTweede;\nlet uitVerschotten = verschotten;\nlet uitBlokken = schoneBlokken;\n\nif (bereik === 'blokken') {\n  // Tekst en structuur uit de payload, alle bedragen van schijf. Een nieuw blok\n  // heeft daar nog geen prijs en begint dus op nul; dat is in het tarievenscherm\n  // meteen zichtbaar.\n  uitBasistarief = Number(huidig.basistarief_cent) || 0;\n  uitTariefTweede = Number(huidig.tarief_tweede_testament_cent) || 0;\n  uitVerschotten = Array.isArray(huidig.verschotten) ? huidig.verschotten : [];\n  const prijzen = new Map(\n    (Array.isArray(huidig.blokken) ? huidig.blokken : []).map((b) => [\n      String(b.id),\n      Number(b.prijs_cent) || 0,\n    ])\n  );\n  uitBlokken = schoneBlokken.map((b) => ({ ...b, prijs_cent: prijzen.get(b.id) ?? 0 }));\n} else if (bereik === 'tarieven') {\n  // Bedragen uit de payload, tekst en structuur van schijf. De blokkenlijst\n  // volgt de schijf: het tarievenscherm mag geen blokken toevoegen of van\n  // volgorde wisselen.\n  const nieuwePrijzen = new Map(schoneBlokken.map((b) => [b.id, b.prijs_cent]));\n  uitBlokken = (Array.isArray(huidig.blokken) ? huidig.blokken : []).map((b) => ({\n    ...b,\n    prijs_cent: nieuwePrijzen.has(String(b.id))\n      ? nieuwePrijzen.get(String(b.id))\n      : Number(b.prijs_cent) || 0,\n  }));\n}\n\n// $comment uit het bestaande bestand behouden: daar staat de waarschuwing in\n// dat de voorbeeldteksten niet juridisch zijn nagekeken. Hij gaat als eerste\n// sleutel het bestand in, zodat wie het bestand opent hem meteen leest.\nconst commentaar = huidig && huidig.$comment ? huidig.$comment : null;\n\nconst uit = {\n  ...(commentaar ? { $comment: commentaar } : {}),\n  soort,\n  naam: bereik === 'tarieven' && huidig ? String(huidig.naam || naam) : naam,\n  bespreeksjabloon:\n    bereik === 'tarieven' && huidig\n      ? (huidig.bespreeksjabloon ?? null)\n      : (akte.bespreeksjabloon ? String(akte.bespreeksjabloon) : null),\n  basistarief_cent: uitBasistarief,\n  tarief_tweede_testament_cent: uitTariefTweede,\n  verschotten: uitVerschotten,\n  blokken: uitBlokken,\n};\n\nconst bewaard = await bewaarVersie(soort);\nfs.mkdirSync(AKTE_DIR, { recursive: true });\nawait writeFileAtomic(bestandVan(soort), JSON.stringify(uit, null, 2) + '\\n');\n\n// Niet blokkerend, wel het melden waard: een placeholder die nergens als veld\n// staat blijft in de akte letterlijk als <<TYPFOUT>> staan.\nconst waarschuwingen = [];\nfor (const blok of (bereik === 'tarieven' ? [] : schoneBlokken)) {\n  const gedeclareerd = new Set([\n    ...blok.velden.map((v) => `<<${v.naam}>>`),\n    ...SYSTEEM_PLACEHOLDERS,\n  ]);\n  const onbekend = [...new Set(placeholdersIn(blok.tekst))].filter((p) => !gedeclareerd.has(p));\n  if (onbekend.length) {\n    waarschuwingen.push(\n      `Blok '${blok.naam}' gebruikt ${onbekend.join(', ')} zonder invulveld; ` +\n      `die tekst komt letterlijk in de akte te staan.`\n    );\n  }\n  const ongebruikt = blok.velden\n    .map((v) => `<<${v.naam}>>`)\n    .filter((p) => !placeholdersIn(blok.tekst).includes(p));\n  if (ongebruikt.length) {\n    waarschuwingen.push(\n      `Blok '${blok.naam}' heeft invelden ${ongebruikt.join(', ')} die niet in de tekst voorkomen.`\n    );\n  }\n}\n\nreturn [{\n  json: {\n    success: true,\n    actie: 'opslaan',\n    soort,\n    naam,\n    nieuw: !bestaatAl,\n    bereik,\n    blokken_aantal: uit.blokken.length,\n    vorige_versie_bewaard_als: bewaard,\n    waarschuwingen,\n  },\n}];"
+      },
+      "id": "5d4b9aaf-5555-4fa0-9aaa-akteblok00005",
+      "name": "Save Akteblok",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -170,
+        1820
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "6d4b9aaf-6666-4fa0-9aaa-akteblok00006",
+      "name": "Respond Akteblok POST",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        90,
+        1820
       ]
     }
   ],
@@ -150,6 +422,116 @@
         [
           {
             "node": "Respond POST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook GET bespreeksjablonen": {
+      "main": [
+        [
+          {
+            "node": "Read Bespreeksjablonen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Bespreeksjablonen": {
+      "main": [
+        [
+          {
+            "node": "Respond Sjablonen GET",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook POST bespreeksjabloon": {
+      "main": [
+        [
+          {
+            "node": "Save Bespreeksjabloon",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Bespreeksjabloon": {
+      "main": [
+        [
+          {
+            "node": "Respond Sjabloon POST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook POST bespreekformulier": {
+      "main": [
+        [
+          {
+            "node": "Save Bespreekformulier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Bespreekformulier": {
+      "main": [
+        [
+          {
+            "node": "Respond Bespreekformulier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook GET akteblokken": {
+      "main": [
+        [
+          {
+            "node": "Read Akteblokken",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Akteblokken": {
+      "main": [
+        [
+          {
+            "node": "Respond Akteblokken GET",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook POST akteblok": {
+      "main": [
+        [
+          {
+            "node": "Save Akteblok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Akteblok": {
+      "main": [
+        [
+          {
+            "node": "Respond Akteblok POST",
             "type": "main",
             "index": 0
           }

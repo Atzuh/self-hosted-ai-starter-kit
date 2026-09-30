@@ -1,0 +1,65 @@
+{
+  "name": "Foutafhandeling",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "f0018a20-0001-4f00-b0b0-105570f00001",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -200,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Zet het jobbestand op 'fout' als de workflow onderweg afbreekt.\n//\n// Waarom dit bestaat: alleen de nodes halverwege en aan het eind schrijven een\n// status in het jobbestand. Breekt de workflow daarvóór af — bijvoorbeeld omdat\n// de bankopdracht niet herkend werd of Docling niet antwoordde — dan blijft de\n// status op 'documenten omzetten' staan. De webapp blijft dan pollen op een run\n// die nooit meer iets doet: geen foutmelding, alleen een oneindige wachtstand.\n//\n// Koppeling job <-> executie: elk jobId eindigt op het n8n-executienummer\n// (`akte_20260901_111014_3265` hoort bij executie 3265). Zo vinden we het\n// bestand terug zonder dat de falende workflow iets hoeft door te geven.\nconst fs = require('fs');\nconst JOB_DIR = '/data/shared/jobs';\n\nconst uitvoering = $json.execution || {};\nconst workflow = $json.workflow || {};\nconst executieId = String(uitvoering.id || '').trim();\n// n8n knipt een lange fout uit een Code-node in tweeën: het begin belandt in\n// 'description' en de staart in 'message'. Aan één van de twee heb je niets, dus\n// plakken we ze weer aan elkaar wanneer ze elkaar aanvullen.\nconst fout = uitvoering.error || {};\nconst delen = [fout.description, fout.message]\n  .map((x) => String(x == null ? '' : x).trim())\n  .filter(Boolean);\nconst uniek = delen.filter((d, i) => !delen.some((ander, j) => j < i && ander.includes(d)));\nconst melding = (uniek.join(' ') || 'Onbekende fout').slice(0, 600);\nconst node = uitvoering.lastNodeExecuted || '';\n\nif (!executieId) {\n  return [{ json: { bijgewerkt: false, reden: 'geen executie-id in de foutmelding' } }];\n}\n\nlet bestanden = [];\ntry {\n  bestanden = fs.readdirSync(JOB_DIR).filter((n) => n.endsWith(`_${executieId}.json`));\n} catch (err) {\n  return [{ json: { bijgewerkt: false, reden: `jobmap onleesbaar: ${err.message}` } }];\n}\n\nif (!bestanden.length) {\n  // Niet elke workflow werkt met een jobbestand (denk aan de status-poll zelf);\n  // dan valt er ook niets te markeren.\n  return [{ json: { bijgewerkt: false, reden: `geen jobbestand voor executie ${executieId}` } }];\n}\n\nconst bijgewerkt = [];\nfor (const naam of bestanden) {\n  const pad = `${JOB_DIR}/${naam}`;\n  let job = {};\n  try {\n    job = JSON.parse(fs.readFileSync(pad, 'utf8'));\n  } catch (_) {\n    // Bestand weg of stuk: dan schrijven we het opnieuw aan met wat we weten.\n  }\n  // Een node die zelf al een nette melding heeft weggeschreven weet beter wat\n  // er misging dan de generieke n8n-fout; die laten we staan.\n  const bestaandeFout = job.fout ? String(job.fout) : '';\n  const nieuw = {\n    ...job,\n    job_id: job.job_id || naam.replace(/\\.json$/, ''),\n    status: 'fout',\n    fout: bestaandeFout || (node ? `${melding} (node: ${node})` : melding),\n    mislukt_in_node: node || null,\n    bijgewerkt_op: new Date().toISOString(),\n  };\n  try {\n    fs.writeFileSync(pad, JSON.stringify(nieuw), 'utf8');\n    bijgewerkt.push(naam);\n  } catch (err) {\n    return [{ json: { bijgewerkt: false, reden: `schrijven mislukt: ${err.message}` } }];\n  }\n}\n\nconsole.error(\n  `[Foutafhandeling] workflow \"${workflow.name || '?'}\" executie ${executieId} afgebroken in ` +\n    `node \"${node}\": ${melding}`\n);\n\nreturn [{ json: { bijgewerkt: true, bestanden: bijgewerkt, executieId, node, melding } }];\n"
+      },
+      "id": "f0018a20-0002-4f00-b0b0-105570f00002",
+      "name": "Markeer Job Mislukt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        40,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Foutafhandeling\n\nDraait automatisch als een andere workflow afbreekt (ingesteld via **Settings → Error workflow** in die workflows).\n\nZonder deze workflow blijft het jobbestand hangen op de laatst geschreven status en ziet de gebruiker in de webapp een run die nooit eindigt in plaats van een foutmelding.\n\nKoppeling job ↔ executie loopt via het jobId, dat eindigt op het executienummer.\n\n**Moet gepubliceerd blijven.** Als draft wordt hij door n8n niet aangeroepen en blijft het jobbestand alsnog hangen.",
+        "height": 260,
+        "width": 420
+      },
+      "id": "f0018a20-0003-4f00-b0b0-105570f00003",
+      "name": "Sticky: uitleg",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        -100
+      ]
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Markeer Job Mislukt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "instanceId": "self-hosted-ai-starter-kit"
+  },
+  "id": "foutafhandeling"
+}

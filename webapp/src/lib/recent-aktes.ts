@@ -17,7 +17,13 @@ interface NginxDirEntry {
 }
 
 /** Grofmazige categorie van een gegenereerd document, voor statistiek. */
-export type AkteKind = "akte" | "analyse" | "overig";
+export type AkteKind =
+  | "akte"
+  | "analyse"
+  | "bespreking"
+  | "testament"
+  | "offerte"
+  | "overig";
 
 /**
  * Verrijkte variant van {@link RecentAkte} met de ruwe timestamp en categorie,
@@ -30,8 +36,8 @@ export interface AkteRecord extends RecentAkte {
 
 /**
  * Leid een leesbaar type + referentie + categorie af uit de bestandsnaam. De
- * n8n-workflow schrijft naar vaste patronen: `hypotheekakte_<zaak>.docx` en
- * `juridische_analyse_<ref>.docx`.
+ * n8n-workflows schrijven naar vaste patronen: `hypotheekakte_<zaak>.docx`,
+ * `juridische_analyse_<ref>.docx` en `besprekingsverslag_<ref>.docx`.
  */
 function parseFilename(name: string): {
   type: string;
@@ -51,6 +57,27 @@ function parseFilename(name: string): {
       type: "Juridische analyse",
       reference: base.slice("juridische_analyse_".length).replace(/_/g, "."),
       kind: "analyse",
+    };
+  }
+  if (base.startsWith("besprekingsverslag_")) {
+    return {
+      type: "Besprekingsverslag",
+      reference: base.slice("besprekingsverslag_".length).replace(/_/g, "."),
+      kind: "bespreking",
+    };
+  }
+  if (base.startsWith("concept_testament_")) {
+    return {
+      type: "Concept-testament",
+      reference: base.slice("concept_testament_".length).replace(/_/g, "."),
+      kind: "testament",
+    };
+  }
+  if (base.startsWith("offerte_")) {
+    return {
+      type: "Offerte",
+      reference: base.slice("offerte_".length).replace(/_/g, "."),
+      kind: "offerte",
     };
   }
   return { type: "Document", reference: base, kind: "overig" };

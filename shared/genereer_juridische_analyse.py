@@ -6,7 +6,8 @@ aandachtspunten. Wordt door de n8n workflow aangeroepen na de LLM-analyse.
 Usage (preferred, geen shell-interpolatie van payload-data):
   python3 /data/shared/genereer_juridische_analyse.py \
     --args-file /tmp/n8n_args_analyse_XYZ.json
-  # JSON-bestand bevat: {"analysis": {...}, "zaaknummer": "...", "bank": "...", "klant": "..."}
+  # JSON-bestand bevat: {"analysis": {...}, "zaaknummer": "...", "bank": "...",
+  #                       "klant": "...", "zaaksoort": "hypotheek|levering"}
   # Het bestand wordt na inlezen verwijderd (zelfopruimend).
 
 Flag-based:
@@ -14,7 +15,8 @@ Flag-based:
     --analysis '<json>' \
     --zaaknummer 5238033 \
     [--bank "Rabobank"] \
-    [--klant "Janssen / Pietersen"]
+    [--klant "Janssen / Pietersen"] \
+    [--zaaksoort levering]
 
 Output: /data/shared/output/juridische_analyse_<zaaknummer>.docx
 """
@@ -44,6 +46,16 @@ ERNST_KLEUR = {
     "kritiek": RGBColor(0x8B, 0x26, 0x35),
     "aandacht": RGBColor(0xE6, 0xA2, 0x10),
     "info": RGBColor(0x09, 0x5A, 0xA5),
+}
+
+# De zaaksoort die de gebruiker bij de upload koos; stuurt de prompts en staat
+# als context in de kop van het rapport.
+ZAAKSOORT_LABEL = {
+    "hypotheek": "Hypotheek",
+    "levering": "Levering",
+    # Een dossier kan beide bevatten: een A-B-levering met de hypotheekakte er
+    # direct achteraan. De sleutel is de canonieke, gesorteerde combinatie.
+    "hypotheek+levering": "Levering en hypotheek",
 }
 
 DEFAULT_FONT = "Calibri"
@@ -118,7 +130,8 @@ def _normaliseer_ernst(ernst: str) -> str:
     return aliases.get(e, "info")
 
 
-def render_docx(analysis: dict, *, zaaknummer: str, bank: str, klant: str) -> Path:
+def render_docx(analysis: dict, *, zaaknummer: str, bank: str, klant: str,
+                zaaksoort: str = "hypotheek") -> Path:
     samenvatting = str(analysis.get("samenvatting") or "").strip()
     aandachtspunten = analysis.get("aandachtspunten") or []
     if not isinstance(aandachtspunten, list):
@@ -148,8 +161,13 @@ def render_docx(analysis: dict, *, zaaknummer: str, bank: str, klant: str) -> Pa
 
     meta_p = doc.add_paragraph()
     meta_p.paragraph_format.space_after = Pt(8)
-    bits = [
-        ("Bank", bank or "—"),
+    # Bij een levering is er meestal geen bank; die regel dan weglaten in plaats
+    # van een streepje tonen bij een veld dat voor die zaaksoort niet bestaat.
+    soort = (zaaksoort or "hypotheek").strip().lower()
+    bits = [("Zaaksoort", ZAAKSOORT_LABEL.get(soort, ZAAKSOORT_LABEL["hypotheek"]))]
+    if bank or "hypotheek" in soort.split("+"):
+        bits.append(("Bank", bank or "—"))
+    bits += [
         ("Cliënt", klant or "—"),
         ("Gegenereerd", datetime.now().strftime("%d-%m-%Y %H:%M")),
     ]
@@ -181,6 +199,23 @@ def render_docx(analysis: dict, *, zaaknummer: str, bank: str, klant: str) -> Pa
     else:
         _add_paragraph(doc, "Geen samenvatting beschikbaar.",
                        italic=True, color=META_COLOR, space_after=8)
+
+    # Wat er niet is aangeleverd, is ook niet getoetst. Zonder deze opsomming
+    # leest de stilte over rechthebbenden of beslagen als "niets aan de hand",
+    # terwijl de betreffende uitdraai simpelweg ontbrak.
+    niet_getoetst = [
+        str(x).strip() for x in (analysis.get("niet_getoetst") or []) if str(x).strip()
+    ]
+    if niet_getoetst:
+        _add_heading(doc, "Niet getoetst", level=2)
+        _add_paragraph(
+            doc,
+            "De volgende onderdelen zijn niet beoordeeld, omdat de stukken "
+            "waaruit dat moet blijken niet zijn aangeleverd:",
+            size=11, space_after=4,
+        )
+        for regel in niet_getoetst:
+            _add_paragraph(doc, f"\u2022   {regel}", size=11, space_after=2)
 
     _add_heading(doc, "Aandachtspunten", level=2)
     if not aandachtspunten:
@@ -277,7 +312,7 @@ def main() -> int:
         "--args-file",
         dest="args_file",
         default=None,
-        help="Pad naar JSON-bestand met {analysis, zaaknummer, bank, klant}. "
+        help="Pad naar JSON-bestand met {analysis, zaaknummer, bank, klant, zaaksoort}. "
         "Bestand wordt na inlezen verwijderd.",
     )
     parser.add_argument("--analysis", default=None,
@@ -285,6 +320,8 @@ def main() -> int:
     parser.add_argument("--zaaknummer", default=None)
     parser.add_argument("--bank", default="")
     parser.add_argument("--klant", default="")
+    parser.add_argument("--zaaksoort", default="hypotheek",
+                        choices=sorted(ZAAKSOORT_LABEL))
     args = parser.parse_args()
 
     if args.args_file:
@@ -293,6 +330,7 @@ def main() -> int:
         zaaknummer = payload.get("zaaknummer")
         bank = payload.get("bank", "")
         klant = payload.get("klant", "")
+        zaaksoort = payload.get("zaaksoort", "hypotheek")
         if analysis_obj is None or zaaknummer is None:
             print(
                 "ERROR: --args-file payload mist 'analysis' of 'zaaknummer'.",
@@ -322,6 +360,7 @@ def main() -> int:
         zaaknummer = args.zaaknummer
         bank = args.bank
         klant = args.klant
+        zaaksoort = args.zaaksoort
 
     if not isinstance(analysis, dict):
         print("ERROR: analysis moet een JSON-object zijn.", file=sys.stderr)
@@ -333,6 +372,7 @@ def main() -> int:
             zaaknummer=str(zaaknummer),
             bank=str(bank or ""),
             klant=str(klant or ""),
+            zaaksoort=str(zaaksoort or "hypotheek"),
         )
     except Exception as exc:  # noqa: BLE001
         print(f"ERROR: Kon analyse-document niet genereren: {exc}", file=sys.stderr)

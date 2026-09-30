@@ -137,6 +137,13 @@ services:
           n8n publish:workflow --id=juridische-analyse-e2e
           n8n publish:workflow --id=templates-management
           n8n publish:workflow --id=aktecontrole
+          n8n publish:workflow --id=bespreking-verslag
+          n8n publish:workflow --id=job-status
+          n8n publish:workflow --id=testament-concept
+          # De foutafhandeling moet gepubliceerd zijn: als draft roept n8n hem
+          # niet aan en blijft een mislukte run als 'bezig' in beeld staan.
+          n8n publish:workflow --id=foutafhandeling
+          n8n publish:workflow --id=kantoor-instellingen
           touch /demo-data/.imported
           echo "Import complete"
         fi

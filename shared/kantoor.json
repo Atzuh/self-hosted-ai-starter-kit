@@ -1,14 +1,33 @@
 {
-  "$comment": "Kantoor-specifieke standaardwaarden voor de akte-generatie, los van de template-registry. Verschillende notariskantoren vullen hier hun eigen notaris(sen), standplaats en slottekst in. Later beheerd via de webapp-instellingen. Ontbreekt een veld, dan blijft de bijbehorende placeholder in de akte leeg (handmatig in te vullen). slot_tekst is een lijst regels; elke regel wordt een eigen paragraaf op de plek van <<SLOT_TEKST>>. De passeerplaats staat vast in de tekst; het ondertekentijdstip blijft bewust leeg (met de hand in te vullen bij passeren).",
-  "schema_version": 1,
+  "$comment": "Kantoor-specifieke standaardwaarden voor de akte-generatie, los van de template-registry. Verschillende notariskantoren vullen hier hun eigen notaris(sen), standplaats en slottekst in. Later beheerd via de webapp-instellingen. Ontbreekt een veld, dan blijft de bijbehorende placeholder in de akte leeg (handmatig in te vullen). slot_tekst is een lijst regels; elke regel wordt een eigen paragraaf op de plek van <<SLOT_TEKST>>. De passeerplaats staat vast in de tekst; het ondertekentijdstip blijft bewust leeg (met de hand in te vullen bij passeren). Sinds schema 2 staan hier ook de offerte-instellingen: btw_percentage geldt voor het honorarium (verschotten worden zonder btw doorbelast), en offerte_slottekst is een lijst regels onder aan de offerte, waarin <<GELDIG_TOT>> wordt vervangen door de datum die volgt uit offerte_geldigheidsdagen. Sinds schema 3 staan hier ook kantoor_naam (gebruikt in de volmachtteksten via <<KANTOOR_NAAM>>) en volmacht_tekst: de standaardblokken die vlak vóór het slot van de akte komen (volmacht hypothecaire inschrijvingen, rectificatie, bijlagen), elke regel een eigen paragraaf op de plek van <<VOLMACHT_TEKST>>.",
+  "schema_version": 3,
   "notaris_naam": "mr. Stephanus Johannes Gerardus de Kort",
   "notaris_standplaats": "Altena",
+  "kantoor_naam": "De Rivieren Notarissen",
   "bank_volmachthouder": "",
+  "volmacht_tekst": [
+    "VOLMACHT HYPOTHECAIRE INSCHRIJVING(EN)",
+    "De hypotheekgever geeft volmacht aan ieder van de medewerkers van <<KANTOOR_NAAM>> om zonodig namens hem de afstand van hypotheekrechten aan te nemen, voor zover deze nog ten laste van de hypotheekgever en anderen dan de hypotheekgever mochten zijn ingeschreven op het onderpand.",
+    "VOLMACHTVERLENING RECTIFICATIE",
+    "Partijen verlenen hierbij, voor zoveel nodig onherroepelijk, volmacht aan ieder van de medewerkers van <<KANTOOR_NAAM>> om namens hen of één van hen:",
+    "a. te verschijnen in een akte van rectificatie als in deze akte een onjuistheid casu quo onvolledigheid wordt geconstateerd;",
+    "b. verder al datgene meer te doen wat in verband met het vorenstaande nodig mocht zijn.",
+    "BIJLAGEN",
+    "Aan deze akte zijn geen stukken vastgemaakt."
+  ],
   "slot_tekst": [
     "Deze akte is verleden te Andel, gemeente Altena, op de datum in het hoofd van deze akte vermeld.",
     "De verschenen personen zijn mij, notaris, bekend en de identiteit van de bij deze akte betrokken verschenen personen is door mij, notaris, aan de hand van de daartoe bestemde documenten vastgesteld.",
     "De zakelijke inhoud van de akte is aan de verschenen personen opgegeven en toegelicht.",
     "De verschenen personen hebben verklaard op volledige voorlezing van de akte geen prijs te stellen en dat zij en hun volmachtgever(s) tijdig voor het verlijden van de inhoud van de akte hebben kennis genomen en zijn gewezen op de gevolgen die voor partijen uit de akte voortvloeien, alsmede met de inhoud van de akte in te stemmen.",
     "Daarna is de akte beperkt voorgelezen en onmiddellijk door de verschenen personen en mij, notaris, ondertekend, om ...... uur."
+  ],
+  "btw_percentage": 21,
+  "offerte_geldigheidsdagen": 30,
+  "offerte_slottekst": [
+    "Deze offerte is geldig tot en met <<GELDIG_TOT>> en is gebaseerd op de gegevens zoals besproken.",
+    "De genoemde honorariumbedragen zijn exclusief btw; verschotten worden zonder btw doorbelast.",
+    "Wijzigt uw situatie of uw wens, dan kan het tarief wijzigen. Wij overleggen dat vooraf met u.",
+    "Deze offerte is een prijsopgave, geen declaratie, en staat onder voorbehoud van de definitieve inhoud van de akte."
   ]
 }

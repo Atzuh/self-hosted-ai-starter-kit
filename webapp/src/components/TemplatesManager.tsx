@@ -2,29 +2,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
-  Download,
   Eye,
   FileText,
   Loader2,
   RefreshCw,
   Upload,
-  X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { BespreeksjabloonBeheer } from "@/components/BespreeksjabloonBeheer";
+import { AkteblokBeheer } from "@/components/AkteblokBeheer";
+import { OffertetariefBeheer } from "@/components/OffertetariefBeheer";
+import { DocxPreviewModal, type DocxPreviewDoel } from "@/components/DocxPreviewModal";
 
 function templateUrl(bank: BankInfo): string | null {
   if (!bank.file_exists || !bank.template_filename) return null;
   return `/templates/${bank.bank_id}/${encodeURIComponent(bank.template_filename)}`;
-}
-
-interface PreviewState {
-  bank: BankInfo;
-  html: string | null;
-  loading: boolean;
-  error: string | null;
 }
 
 const DEFAULT_LIST_URL = "http://localhost:5678/webhook/templates";
@@ -48,6 +43,9 @@ interface ListResponse {
   schema_version?: number;
   banks?: BankInfo[];
   error?: string;
+  /** n8n serveerde een gecachte lijst omdat de registry even onleesbaar was. */
+  stale?: boolean;
+  warning?: string;
 }
 
 interface UploadResponse {
@@ -89,54 +87,61 @@ export function TemplatesManager() {
   const [banks, setBanks] = useState<BankInfo[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [uploadingBank, setUploadingBank] = useState<string | null>(null);
   const [lastUploadMsg, setLastUploadMsg] = useState<{
     bankId: string;
     text: string;
     kind: "success" | "error";
   } | null>(null);
-  const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [preview, setPreview] = useState<DocxPreviewDoel | null>(null);
+  const [tab, setTab] = useState<
+    "banken" | "besprekingen" | "akteblokken" | "tarieven"
+  >("banken");
 
-  const openPreview = useCallback(async (bank: BankInfo) => {
+  const openPreview = useCallback((bank: BankInfo) => {
     const url = templateUrl(bank);
-    if (!url) return;
-    setPreview({ bank, html: null, loading: true, error: null });
-    try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      const arrayBuffer = await res.arrayBuffer();
-      // mammoth (~500 KB) pas laden wanneer de gebruiker daadwerkelijk een
-      // preview opent — houdt de initiële bundel klein.
-      const mammoth = await import("mammoth");
-      const result = await mammoth.convertToHtml({ arrayBuffer });
-      setPreview({ bank, html: result.value, loading: false, error: null });
-    } catch (err) {
-      setPreview({
-        bank,
-        html: null,
-        loading: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    if (!url || !bank.template_filename) return;
+    setPreview({
+      titel: `${bank.display_name} — template`,
+      bestandsnaam: bank.template_filename,
+      url,
+    });
   }, []);
 
   const fetchBanks = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-    try {
-      const res = await fetch(listUrl, { method: "GET" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      const data = (await res.json()) as ListResponse;
-      if (!data.success) {
-        throw new Error(data.error || "Onbekende fout van n8n");
+    setWarning(null);
+    // De registry ligt op een Docker-bind-mount die kan falen met EIO — zie de
+    // 'Read Registry'-node in n8n: dat wijst meestal op een bestand dat macOS
+    // naar iCloud heeft weggeschreven. n8n probeert het zelf al opnieuw; deze
+    // extra pogingen vangen de rest af zonder dat de gebruiker op 'Vernieuwen'
+    // hoeft te klikken.
+    const attempts = 3;
+    let lastError = "Onbekende fout";
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        const res = await fetch(listUrl, { method: "GET", cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        const data = (await res.json()) as ListResponse;
+        if (!data.success) {
+          throw new Error(data.error || "Onbekende fout van n8n");
+        }
+        setBanks(data.banks || []);
+        setWarning(data.stale ? data.warning || "Verouderde gegevens." : null);
+        setIsLoading(false);
+        return;
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        if (attempt < attempts) {
+          await new Promise((resolve) => setTimeout(resolve, attempt * 400));
+        }
       }
-      setBanks(data.banks || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setBanks(null);
-    } finally {
-      setIsLoading(false);
     }
+    setError(lastError);
+    setBanks(null);
+    setIsLoading(false);
   }, [listUrl]);
 
   useEffect(() => {
@@ -195,7 +200,7 @@ export function TemplatesManager() {
   return (
     <div className="mx-auto w-full max-w-[1400px] px-4 pb-16 pt-8 sm:px-8 sm:pt-12">
       {/* Hero */}
-      <section className="mb-12 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
+      <section className="mb-8">
         <div className="animate-fade-up">
           <div className="mb-5 flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-sm border border-line-strong bg-surface/80 px-2 py-1 text-[10.5px] font-medium uppercase tracking-[0.14em] text-ink-soft">
@@ -204,30 +209,71 @@ export function TemplatesManager() {
             </span>
           </div>
           <h1 className="font-display text-[44px] font-medium leading-[1.02] text-ink-strong sm:text-[64px]">
-            Bank-templates beheren
+            Templates beheren
           </h1>
-          <p className="mt-4 max-w-xl text-[15.5px] leading-relaxed text-ink">
-            Per bank wordt één actieve template gebruikt. Upload een nieuwe
-            <span className="font-mono"> .docx</span> om de huidige te
-            vervangen — de wijziging is direct actief in de generator.
+          <p className="mt-4 max-w-2xl text-[15.5px] leading-relaxed text-ink">
+            De banktemplates zijn Word-documenten waarin de hypotheekakte wordt
+            gegoten; de bespreekformulieren zijn de vaste kopjes waarop een
+            besprekingsverslag wordt geordend; de akteblokken zijn de
+            tekstfragmenten waaruit een concept-akte wordt opgebouwd. Wat die
+            blokken kosten staat apart, onder Offertetarieven.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={fetchBanks}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3.5 w-3.5" />
-            )}
-            Vernieuwen
-          </Button>
-        </div>
       </section>
+
+      {/* Twee soorten templates, twee heel verschillende vormen — vandaar een
+          schakelaar in plaats van één lange pagina. */}
+      <div className="mb-8 inline-flex rounded-md border border-line-strong bg-surface p-0.5">
+        {([
+          { id: "banken", label: "Banktemplates" },
+          { id: "besprekingen", label: "Bespreekformulieren" },
+          { id: "akteblokken", label: "Akteblokken" },
+          { id: "tarieven", label: "Offertetarieven" },
+        ] as const).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={cn(
+              "rounded-[5px] px-4 py-1.5 text-[13px] font-medium transition-colors",
+              tab === t.id
+                ? "bg-ink-strong text-paper"
+                : "text-ink-soft hover:bg-wash hover:text-ink-strong"
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "besprekingen" && <BespreeksjabloonBeheer />}
+
+      {tab === "akteblokken" && <AkteblokBeheer />}
+
+      {tab === "tarieven" && <OffertetariefBeheer />}
+
+      {tab === "banken" && (
+      <>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-2xl text-[14px] leading-relaxed text-ink-soft">
+          Per bank wordt één actieve template gebruikt. Upload een nieuwe
+          <span className="font-mono"> .docx</span> om de huidige te vervangen —
+          de wijziging is direct actief in de generator.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={fetchBanks}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="h-3.5 w-3.5" />
+          )}
+          Vernieuwen
+        </Button>
+      </div>
 
       {error && (
         <div className="mb-6 flex items-start gap-3 rounded-md border border-danger/30 border-l-4 border-l-danger bg-danger-pale p-4 text-sm">
@@ -243,6 +289,21 @@ export function TemplatesManager() {
             <div className="mt-1 font-mono text-[11px] text-ink-soft">
               GET {listUrl}
             </div>
+          </div>
+        </div>
+      )}
+
+      {warning && !error && (
+        <div className="mb-6 flex items-start gap-3 rounded-md border border-amber/30 border-l-4 border-l-amber bg-amber-pale p-4 text-sm">
+          <AlertTriangle
+            className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber"
+            strokeWidth={2.25}
+          />
+          <div className="flex-1">
+            <div className="font-display font-bold text-ink-strong">
+              Verouderde template-gegevens
+            </div>
+            <div className="mt-0.5 text-ink-soft">{warning}</div>
           </div>
         </div>
       )}
@@ -310,8 +371,11 @@ export function TemplatesManager() {
         </div>
       </details>
 
+      </>
+      )}
+
       {preview && (
-        <TemplatePreviewModal preview={preview} onClose={() => setPreview(null)} />
+        <DocxPreviewModal doel={preview} onClose={() => setPreview(null)} />
       )}
     </div>
   );
@@ -475,89 +539,3 @@ function BankCard({
   );
 }
 
-function TemplatePreviewModal({
-  preview,
-  onClose,
-}: {
-  preview: PreviewState;
-  onClose: () => void;
-}) {
-  const { bank, html, loading, error } = preview;
-  const url = templateUrl(bank);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-    >
-      <div
-        className="absolute inset-0 bg-ink-deeper/50 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      <div className="relative flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-line bg-surface shadow-card">
-        <div className="flex items-start justify-between gap-3 border-b border-line/70 px-5 py-4">
-          <div className="min-w-0">
-            <div className="text-[15px] font-semibold leading-tight text-ink-strong">
-              {bank.display_name} — template
-            </div>
-            <div className="mt-0.5 break-all font-mono text-[11px] text-ink-soft">
-              {bank.template_filename}
-            </div>
-          </div>
-          <div className="flex flex-shrink-0 items-center gap-2">
-            {url && (
-              <a
-                href={url}
-                download={bank.template_filename ?? undefined}
-                className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-ink-soft transition-colors hover:border-line-strong hover:bg-wash hover:text-ink-strong"
-              >
-                <Download className="h-3.5 w-3.5" strokeWidth={2} />
-                Download
-              </a>
-            )}
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Sluiten"
-              className="flex h-8 w-8 items-center justify-center rounded-md text-ink-soft transition-colors hover:bg-wash hover:text-ink-strong"
-            >
-              <X className="h-4 w-4" strokeWidth={2} />
-            </button>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-auto bg-wash/40 p-5">
-          {loading && (
-            <div className="flex items-center justify-center gap-2 py-16 text-sm text-ink-soft">
-              <Loader2 className="h-5 w-5 animate-spin" strokeWidth={2} />
-              Template laden…
-            </div>
-          )}
-          {error && (
-            <div className="py-16 text-center text-sm">
-              <div className="text-danger">Kon template niet laden.</div>
-              <div className="mt-1 font-mono text-[11px] text-ink-soft">{error}</div>
-            </div>
-          )}
-          {html && (
-            <div className="mx-auto max-w-2xl rounded-md bg-white p-8 shadow-card">
-              <div
-                className="docx-preview text-[13px] leading-relaxed"
-                dangerouslySetInnerHTML={{ __html: html }}
-              />
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}

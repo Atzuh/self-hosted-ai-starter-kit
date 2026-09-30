@@ -1,0 +1,215 @@
+Received: from VASP01.organisatie.local (172.16.8.10) by
+ VASP01.organisatie.local (172.16.8.10) with Microsoft SMTP Server
+ (version=TLS1_2, cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id
+ 15.2.1544.36 via Mailbox Transport; Thu, 18 Dec 2025 17:12:22 +0100
+Received: from VASP01.organisatie.local (172.16.8.10) by
+ VASP01.organisatie.local (172.16.8.10) with Microsoft SMTP Server
+ (version=TLS1_2, cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id
+ 15.2.1544.36; Thu, 18 Dec 2025 17:12:22 +0100
+Received: from barracuda2.webstate.nl (82.148.192.154) by
+ VASP01.organisatie.local (172.16.8.10) with Microsoft SMTP Server
+ (version=TLS1_2, cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id
+ 15.2.1544.36 via Frontend Transport; Thu, 18 Dec 2025 17:12:22 +0100
+Received: from mail-pg1-f182.google.com (mail-pg1-f182.google.com [209.85.215.182]) by barracuda2.webstate.nl with ESMTP id mqqcCbHoBNwHPgK4 (version=TLSv1.3 cipher=TLS_AES_256_GCM_SHA384 bits=256 verify=NO) for <brugman@derivierennotarissen.nl>; Thu, 18 Dec 2025 17:12:20 +0100 (CET)
+X-Barracuda-Envelope-From: gatanasescu@gmail.com
+X-Barracuda-Effective-Source-IP: mail-pg1-f182.google.com[209.85.215.182]
+X-Barracuda-Apparent-Source-IP: 209.85.215.182
+Received: by mail-pg1-f182.google.com with SMTP id 41be03b00d2f7-b553412a19bso716053a12.1
+        for <brugman@derivierennotarissen.nl>; Thu, 18 Dec 2025 08:12:20 -0800 (PST)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=gmail.com; s=20230601; t=1766074339; x=1766679139; darn=derivierennotarissen.nl;
+        h=to:subject:message-id:date:from:in-reply-to:references:mime-version
+         :from:to:cc:subject:date:message-id:reply-to;
+        bh=HOhLlr2SYQVPth9MTavub8wtCSWdUge8L1XCp+fFpRs=;
+        b=ZuvM84qo38hErwnku+XVyUhLkdqRv4+Px1tgoes4WcxtI6SMiSrRnNAQMhX9Rkb/xS
+         0z0enkdgTXws8uwJ6zcIqVwVGWb2DMuXNOWv328QP0P1TnrGmVfN/pk66tHDKdjIw6b/
+         z78Gd28ovyIq8Bt2J01C4Am3KJUdf/7QF2fE4u2pdooNqSWeKJwydM5Pclpd1amlub3u
+         psWPW/M9KzOPkTeqRrK2W302TWS2xqgpujulQwSJ0PGLHSzXm90Y6/HHRe1yVktPe5Py
+         PpqkbM07kY/gckpmq0MCQ59Z45xucD2mZvYi4OCc3KA1JPXJ0B7Ij2wl5gooJ5s6U1aF
+         FeWA==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20230601; t=1766074339; x=1766679139;
+        h=to:subject:message-id:date:from:in-reply-to:references:mime-version
+         :x-gm-gg:x-gm-message-state:from:to:cc:subject:date:message-id
+         :reply-to;
+        bh=HOhLlr2SYQVPth9MTavub8wtCSWdUge8L1XCp+fFpRs=;
+        b=oGK+pcgaMJ/K1VRe0XcLL5M3RbuFPjP9jfaqNHD9QUFfXCsbsXScy2L9G70NV7t4cN
+         klmyaL7isKZZRQbfsK/NyuBNMosPM28axexhThGrFHuxFtsoaWowXEhohEa8qTY1n7rq
+         Hgtm6yNorbqu49mUpw0R4D6PctNNti4/U+Kq4YokwQAOYFsT9Ti6o6aICpl2U2B07JGI
+         B2VYSt6GY155ZSLj/CYqbAxmEZkI9pRrECJtaMfLZGyD8+Wm9OATMlofk0YXEXEBV3ap
+         SnVcrXfOJPNW+iKZSTxKI8JRGyyGoW+3w0jmyhYN8sQpUdLYxt7pyJywPqh6bD/46A+W
+         hGzw==
+X-Gm-Message-State: AOJu0YyteeMcO2jJvX6Bzy6XblEHV9lF7jsOJPh+USpy7UhMMwVxJ6CI
+	gsjE90goBa2xiDMi6SPjTr+Q9riV7Qn5cCYWMG8rPUYZh/hsJ1108hCKLD3TyPAg6/mp/QmOdZA
+	Buw3GJTjOxOagDBddYPoMvhZoGWuVuT1vOA==
+X-Gm-Gg: AY/fxX6/cPOxxkHPs01ZWhpsk4I5m96FYf7nyI53hHBz80Dz+3D7S4qFjVRct4LSzqB
+	3GFoc8sVS2wZCP8tPDNfOz5/HjWQPTv8Iyzb9o7Mi6RPwnVzfVI4own5H4BNRRAM+HrnjtR+3nk
+	k/02p/r53wKKssz31s7YNK/wpHwQlY7a9i+YfYsiVUhuHihA0HqOxMYMuo54FEuAhidKOT/TviS
+	0XFVRs7GbcngDdAu+07e0HQqd9VL/1OHBSXwOrdXqFoKCeLJrcCB46hcl4rbL4+KzDSjcZkP/Dp
+	l00hDSOvA53RPfm0gKxYbAFPNCvB
+X-Google-Smtp-Source: AGHT+IGvZflQ3BFTQykdHFEV4kphvWCE9Nu1SZ+vS5y+Z4F0X+jC4TdgEwzaBmIfWaGsxKOqmALQibDPnAyTiBP3zWw=
+X-Received: by 2002:a05:693c:8009:b0:2a4:3593:646a with SMTP id
+ 5a478bee46e88-2ac300f6825mr15843389eec.26.1766074338519; Thu, 18 Dec 2025
+ 08:12:18 -0800 (PST)
+MIME-Version: 1.0
+References: <AfNWHpgDQQuWXCcOzvueQA@geopod-ismtpd-15>
+In-Reply-To: <AfNWHpgDQQuWXCcOzvueQA@geopod-ismtpd-15>
+From: George Adrian Tanasescu <gatanasescu@gmail.com>
+Date: Thu, 18 Dec 2025 17:12:06 +0100
+X-Gm-Features: AQt7F2oI7gbX6I1n1zBbfNUmXFHHFnJrIbobLuytQIEmpM1DNvN59leOVrwajSI
+Message-ID: <CAJMHGwwin6pjcoWdJeVS+uCY1upQMhO-B_xjfRUmqB+GBpoHWQ@mail.gmail.com>
+Subject: Re: Opdracht bij De Rivieren Notarissen 2025.2951
+To: "De Rivieren Notarissen - mw. T.M. (Marloes) Brugman - Manschot" <brugman@derivierennotarissen.nl>
+X-ASG-Orig-Subj: Re: Opdracht bij De Rivieren Notarissen 2025.2951
+Content-Type: multipart/alternative; boundary="000000000000982e0306463c39a0"
+X-Barracuda-Connect: mail-pg1-f182.google.com[209.85.215.182]
+X-Barracuda-Start-Time: 1766074340
+X-Barracuda-Encrypted: TLS_AES_256_GCM_SHA384
+X-Barracuda-URL: https://82.148.192.154:8443/cgi-mod/mark.cgi
+X-Virus-Scanned: by bsmtpd at webstate.nl
+X-Barracuda-Scan-Msg-Size: 18427
+X-Barracuda-BRTS-Status: 0
+X-ASG-Debug-ID: 1766074339-1cfebf0eefea010001-wEYhmy
+X-Barracuda-Spam-Score: 0.50
+X-Barracuda-Spam-Status: No, SCORE=0.50 using global scores of TAG_LEVEL=3.5 QUARANTINE_LEVEL=1000.0 KILL_LEVEL=5.0 test= 
+X-Barracuda-Spam-Report: Code version 3.2, rules version 3.2.3.125474
+	Rule breakdown below
+	  pts rule name              description
+	 ---- ---------------------- --------------------------------------------------
+	 0.00 HTML_MESSAGE           BODY: HTML included in message
+	 0.50 BSF_SC1_TG070          Custom Rule TG070
+Return-Path: gatanasescu@gmail.com
+X-MS-Exchange-Organization-Network-Message-Id: 76350d20-dd81-4bf6-1a22-08de3e503a2a
+X-MS-Exchange-Organization-AVStamp-Enterprise: 1.0
+X-MS-Exchange-Organization-AuthSource: VASP01.organisatie.local
+X-MS-Exchange-Organization-AuthAs: Anonymous
+X-MS-Exchange-Transport-EndToEndLatency: 00:00:00.2240985
+X-MS-Exchange-Processed-By-BccFoldering: 15.02.1544.035
+Content-Type: multipart/related; boundary="_000_2c136846-60a9-4460-9d86-752cefeaba02_"; type="multipart/alternative"
+MIME-Version: 1.0
+
+--_000_2c136846-60a9-4460-9d86-752cefeaba02_
+Content-Type: multipart/alternative; boundary="_001_e6ce89af-13ea-4feb-b36b-1d94d003f304_"
+
+--_001_e6ce89af-13ea-4feb-b36b-1d94d003f304_
+Content-Type: text/plain; charset="ascii"
+
+Beste mw. Brugman,
+
+Is het niet mogelijk eerder een afspraak te maken, aub? Dit ivm een koopovereenkomst afspraak die heb ik gemaakt.
+
+
+Met vriendelijke groet,
+
+Adrian Tanasescu
+
+
+On Thu, Dec 18, 2025, 16:27 De Rivieren Notarissen - mw. T.M. (Marloes) Brugman - Manschot <brugman@derivierennotarissen.nl <mailto:brugman@derivierennotarissen.nl> > wrote:
+
+
+	
+	Geachte heer Tanasescu,
+	
+	Hierbij bericht ik u dat ons is verzocht de vestiging van een hypotheekrecht voor de woning Mauritshuis 39 te Capelle aan den IJssel te verzorgen. Voor de behandeling van uw zaak zijn onderstaande punten van belang:
+	
+	Online Dossier
+	Tijdens de behandeling van uw zaak zullen wij informatie (concept van de akte(n), nota's van afrekeningen et cetera) met u uitwisselen. Om dit veilig en handig te laten verlopen, communiceren wij via een beveiligde omgeving, het ‘Online Dossier’ genoemd. Hier kunnen documenten geüpload worden en u kunt de voortgang van uw zaak bekijken. Als uw zaak is afgerond, blijft deze omgeving voor u toegankelijk en kunt u de opgemaakte documenten daar terugvinden.
+	
+	U heeft al een account bij het Online Dossier. Om in te loggen, klikt u op de volgende link: Inloggen Online Dossier <https://derivieren.notarisdossier.nl/nl> .
+	
+	Verplicht cliëntenonderzoek
+	Voordat wij aan de slag kunnen met de opdracht, moeten wij op grond van de wet eerst uw identiteit vaststellen en een aantal zaken van u weten. Ook als u eerder bij ons op kantoor bent geweest, zijn wij verplicht dit opnieuw te vragen. Wij mogen geen werkzaamheden voor u verrichten als het zogenaamde "cliëntenonderzoek" niet kan worden afgerond.
+	Daarnaast zijn wij verplicht om ongebruikelijke transacties te melden bij een landelijk meldpunt van de overheid.
+	
+	Vragenlijsten
+	Voor het invullen van de vragenlijsten werken wij met een cliëntenportaal (WwfTrace). Via dit portaal kunt u op een veilige, eenvoudige en efficiënte manier de vragenlijsten invullen.
+	U ontvangt binnenkort een e-mail van ons kantoor met een link om in te loggen.
+	Voor extra veiligheid gebruiken wij een verificatiecode, die u separaat ontvangt van onze partner WwfTrace via het e-mailadres noreply@wwftrace.nl <mailto:noreply@wwftrace.nl> .
+	Voer deze code in op de inlogpagina om toegang te krijgen tot het cliëntportaal.
+	
+	Wij vragen u vriendelijk om de vragenlijsten zo snel mogelijk in te vullen en de benodigde informatie via dit cliëntenportaal aan te leveren, liefst binnen drie werkdagen. Hoe eerder u de vragenlijsten invult en de benodigde informatie aanlevert, hoe eerder wij aan het werk kunnen.
+	Voor de goede orde wijs ik u er op dat het niet tijdig aanleveren van de gevraagde documenten extra kosten met zich mee kan brengen.
+	
+	Reservering
+	Voor het ondertekenen van de akte(n) heb ik een reservering gemaakt voor woensdag 11 februari 2026 om 11:30 uur op onze vestiging te Rijswijk (NB) aan het Parelplein 2 <https://www.google.com/maps/search/Parelplein+2?entry=gmail&source=g> . Deze reservering is gemaakt onder de voorwaarde dat wij de gevraagde documenten binnen de aangegeven tijd van u hebben ontvangen. 
+	
+	Contactpersoon
+	Als contactpersoon van ons kantoor is aangewezen Rosanna de Ruiter.
+	Voor eventuele vragen en/of opmerkingen kunt u met Rosanna de Ruiter contact opnemen via deruiter@derivierennotarissen.nl <mailto:deruiter@derivierennotarissen.nl>  of bellen naar 085 022 0023. Zij staat u graag te woord! Bij haar afwezigheid is er altijd een collega beschikbaar voor uw vragen of opmerkingen.
+	
+	Tip
+	Omdat wij een telefoonnummer hebben dat begint met 085, kan het voorkomen dat vanuit uw mobiele instellingen, een inkomend telefoontje van ons gekenmerkt wordt met "mogelijk SPAM". Als u ons telefoonnummer opslaat in uw contacten, is het voor u gelijk duidelijk dat wij het zijn en geen telefonische verkoper.
+	
+	Mochten er nog zaken onduidelijk zijn, laat het vooral weten!
+	
+	Met vriendelijke groet,
+	
+	Mw. T.M. (Marloes) Brugman - Manschot
+	bereikbaar op maandag, donderdag en vrijdag
+	Tel.nr: 085 0220 023
+	 
+	Kosteloos abonnement op onze nieuwsbrief <http://www.derivierennotarissen.nl/> 
+	Informatie en aanmelden voor onze gratis lezingen <https://www.derivierennotarissen.nl/lezingen/> .
+	Voor onze privacyverklaring verwijzen wij u naar onze website: www.derivierennotarissen.nl <http://www.derivierennotarissen.nl> .
+	Inloggen in Online Dossier <http://derivieren.notarisdossier.nl> 
+	 
+	 <https://office-public.azureedge.net/derivieren/logo.png> 
+	 
+	Rabobank Altena-Bommelerwaard NL 25 RABO 0341 5039 16 (BIC RABONL2U) 
+	ABN AMRO Bank NL 33 ABNA 0509 8179 98 (BIC ABNANLBA) 
+	ten name van: De Rivieren Notarissen, derdengelden 
+	 
+	Wwft 
+	Op grond van de Wet ter voorkoming van witwassen en financieren van terrorisme is de notaris in voorkomende gevallen verplicht tot een cliëntenonderzoek en is er eventueel een meldingsplicht. Over een melding mag de cliënt niet worden geïnformeerd. 
+	 
+	Algemene Voorwaarden 
+	De Rivieren Notarissen is een maatschap van besloten vennootschappen en natuurlijke personen met als doel de uitoefening van de notarispraktijk. De aansprakelijkheid van de (kandidaat-)notaris(sen) c.q. de besloten vennootschap(pen) is beperkt tot het bedrag waarvoor de beroepsaansprakelijkheidsverzekering in voorkomend geval de (kandidaat-)notaris(sen) aanspraak op uitkering geeft. Op de dienstverlening zijn van toepassing de algemene voorwaarden van Netwerk Notarissen, gedeponeerd bij de griffie van de Rechtbank in Utrecht. Deze zijn op verzoek kosteloos verkrijgbaar bij het notariskantoor en te raadplegen op de website. 
+	 
+	Netwerk Notarissen 
+	De Rivieren Notarissen is aangesloten bij Netwerk Notarissen, een landelijk samenwerkingsverband van 160 zelfstandige notariskantoren. De samenwerking is gericht op kennisuitwisseling, juridisch onderzoek, vakopleiding, kwaliteitszorg en bedrijfsvoering. Dit e-mail bericht van De Rivieren Notarissen is uitsluitend bestemd voor de geadresseerde en kan privacygevoelige en/of vertrouwelijke informatie bevatten. Indien dit e-mail bericht niet aan u is gericht, dan wel abusievelijk aan u is verstuurd, dan wordt u hierbij verzocht het e-mail bericht te retourneren aan de afzender en het daarna te vernietigen. Gebruik van de informatie door anderen dan de geadresseerde, evenals openbaarmaking, reproductie en distributie zijn niet toegestaan zonder goedkeuring van de afzender en valt buiten de verantwoordelijkheid en de aansprakelijkheid van De Rivieren Notarissen.
+	 
+	P Denk aan ons milieu voordat u besluit om deze mail te printen.
+	 <https://paars.notarisdossier.nl/v3/mark-email-as-read/ec573913-6908-430b-bb6e-a31b5e9cb4f5>  <https://u19203993.ct.sendgrid.net/wf/open?upn=u001.YACuX8RQyEhSCr7-2BqV60amj8RlKcwmoyW3-2BtJKWFIuUOTO4GvLxfe-2Bief-2BR49fHgH-2FbhCCALpq-2BNgbndd88tOVWIQekI5ugBCtUPgrYBEFaZWHtHmWqCEYsadQPS-2FQcE-2BZGAj0hHWJEALFgFTos1KCML5N74TohAr4WF2DjvaNMIRy22lCxKsqo-2Bz9qv3IrpMnSAfJ293A2Pq-2FLycsdJMA-3D-3D> 
+
+
+--_001_e6ce89af-13ea-4feb-b36b-1d94d003f304_
+Content-Type: text/html; charset="utf-8"
+
+<html><head></head><body><div dir="auto"><div>Beste mw. Brugman,</div><div dir="auto"><br></div><div dir="auto">Is het niet mogelijk eerder een afspraak te maken, aub? Dit ivm een koopovereenkomst afspraak die heb ik gemaakt.</div><div dir="auto"><br></div><div dir="auto"><br></div><div dir="auto">Met vriendelijke groet,</div><div dir="auto"><br></div><div dir="auto">Adrian Tanasescu<br><br><div class="gmail_quote gmail_quote_container" dir="auto"><div dir="ltr" class="gmail_attr">On Thu, Dec 18, 2025, 16:27 De Rivieren Notarissen - mw. T.M. (Marloes) Brugman - Manschot &lt;<a href="mailto:brugman@derivierennotarissen.nl">brugman@derivierennotarissen.nl</a>&gt; wrote:<br></div><blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px #ccc solid;padding-left:1ex"><u></u>
+
+
+
+<div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black">Geachte heer Tanasescu,<br><br>Hierbij bericht ik u dat ons is verzocht de vestiging van een hypotheekrecht voor de woning Mauritshuis 39 te Capelle aan den IJssel te verzorgen. Voor de behandeling van uw zaak zijn onderstaande punten van belang:<br><br><strong>Online Dossier</strong><br>Tijdens de behandeling van uw zaak zullen wij informatie (concept van de akte(n), nota's van afrekeningen et cetera) met u uitwisselen. Om dit veilig en handig te laten verlopen, communiceren wij via een beveiligde omgeving, het ‘Online Dossier’ genoemd. Hier kunnen documenten geüpload worden en u kunt de voortgang van uw zaak bekijken. Als uw zaak is afgerond, blijft deze omgeving voor u toegankelijk en kunt u de opgemaakte documenten daar terugvinden.<br><br>U heeft al een account bij het Online Dossier. Om in te loggen, klikt u op de volgende link: <a href="https://derivieren.notarisdossier.nl/nl" target="_blank" rel="noreferrer">Inloggen Online Dossier</a>.<br><br><strong>Verplicht cliëntenonderzoek</strong><br>Voordat wij aan de slag kunnen met de opdracht, moeten wij op grond van de wet eerst uw identiteit vaststellen en een aantal zaken van u weten. Ook als u eerder bij ons op kantoor bent geweest, zijn wij verplicht dit opnieuw te vragen. Wij mogen geen werkzaamheden voor u verrichten als het zogenaamde "cliëntenonderzoek" niet kan worden afgerond.<br>Daarnaast zijn wij verplicht om ongebruikelijke transacties te melden bij een landelijk meldpunt van de overheid.<br><br><strong>Vragenlijsten</strong><br>Voor het invullen van de vragenlijsten werken wij met een cliëntenportaal (WwfTrace). Via dit portaal kunt u op een veilige, eenvoudige en efficiënte manier de vragenlijsten invullen.<br>U ontvangt binnenkort een e-mail van ons kantoor met een link om in te loggen.<br>Voor extra veiligheid gebruiken wij een verificatiecode, die u separaat ontvangt van onze partner WwfTrace via het e-mailadres <a href="mailto:noreply@wwftrace.nl" target="_blank" rel="noreferrer">noreply@wwftrace.nl</a>.<br>Voer deze code in op de inlogpagina om toegang te krijgen tot het cliëntportaal.<br><br>Wij vragen u vriendelijk om de vragenlijsten zo snel mogelijk in te vullen en de benodigde informatie via dit cliëntenportaal aan te leveren, liefst binnen drie werkdagen. Hoe eerder u de vragenlijsten invult en de benodigde informatie aanlevert, hoe eerder wij aan het werk kunnen.<br>Voor de goede orde wijs ik u er op dat het niet tijdig aanleveren van de gevraagde documenten extra kosten met zich mee kan brengen.<br><br><strong>Reservering</strong><br>Voor het ondertekenen van de akte(n) heb ik een reservering gemaakt voor <strong>woensdag 11 februari 2026 om 11:30 uur</strong>&nbsp;op onze vestiging <strong>te Rijswijk (NB) aan het <a href="https://www.google.com/maps/search/Parelplein+2?entry=gmail&amp;source=g">Parelplein 2</a></strong>. Deze reservering is gemaakt onder de voorwaarde dat wij de gevraagde documenten binnen de aangegeven tijd van u hebben ontvangen. <br><br><strong>Contactpersoon</strong><br>Als contactpersoon van ons kantoor is aangewezen Rosanna de Ruiter.<br>Voor eventuele vragen en/of opmerkingen kunt u met Rosanna de Ruiter contact opnemen via <a href="mailto:deruiter@derivierennotarissen.nl" target="_blank" rel="noreferrer">deruiter@derivierennotarissen.nl</a> of bellen naar 085 022 0023. Zij staat u graag te woord! Bij haar afwezigheid is er altijd een collega beschikbaar voor uw vragen of opmerkingen.<br><br><strong>Tip</strong><br>Omdat wij een telefoonnummer hebben dat begint met 085, kan het voorkomen dat vanuit uw mobiele instellingen, een inkomend telefoontje van ons gekenmerkt wordt met "mogelijk SPAM". Als u ons telefoonnummer opslaat in uw contacten, is het voor u gelijk duidelijk dat wij het zijn en geen telefonische verkoper.<br><br>Mochten er nog zaken onduidelijk zijn, laat het vooral weten!<br><br>Met vriendelijke groet,<br><br>Mw. T.M. (Marloes) Brugman - Manschot<br>bereikbaar op maandag, donderdag en vrijdag<br>Tel.nr: 085 0220 023</div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black">&nbsp;</div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black"><span style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black">Kosteloos abonnement op onze <a href="http://www.derivierennotarissen.nl/" rel="noopener noreferrer noreferrer" target="_blank">nieuwsbrief</a></span></div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black">Informatie en aanmelden voor onze gratis <a title="lezingen" href="https://www.derivierennotarissen.nl/lezingen/" target="_blank" rel="noreferrer">lezingen</a>.</div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black">Voor onze privacyverklaring verwijzen wij u naar onze website: <a href="http://www.derivierennotarissen.nl" target="_blank" rel="noreferrer">www.derivierennotarissen.nl</a>.</div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black">Inloggen in <a href="http://derivieren.notarisdossier.nl" target="_blank" rel="noreferrer">Online Dossier</a></div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black">
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black">&nbsp;</div>
+</div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black"><img style="height:130px" src="https://office-public.azureedge.net/derivieren/logo.png" alt="derivieren" border="0"></div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black">&nbsp;</div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black"><span style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:#827876">Rabobank Altena-Bommelerwaard NL 25 RABO 0341 5039 16 (BIC RABONL2U) </span></div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black"><span style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:#827876">ABN AMRO Bank NL 33 ABNA 0509 8179 98 (BIC ABNANLBA) </span></div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black"><span style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:#827876">ten name van: De Rivieren Notarissen, derdengelden </span></div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black">&nbsp;</div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black"><span style="font-size:8pt;font-family:Arial,sans-serif,serif,EmojiFont;color:#827876"> <strong>Wwft</strong> </span></div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black"><span style="font-size:8pt;font-family:Arial,sans-serif,serif,EmojiFont;color:#827876">Op grond van de Wet ter voorkoming van witwassen en financieren van terrorisme is de notaris in voorkomende gevallen verplicht tot een cliëntenonderzoek en is er eventueel een meldingsplicht. Over een melding mag de cliënt niet worden geïnformeerd. </span></div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black">&nbsp;</div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black"><span style="font-size:8pt;font-family:Arial,sans-serif,serif,EmojiFont;color:#827876"><strong>Algemene Voorwaarden</strong> </span></div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black"><span style="font-size:8pt;font-family:Arial,sans-serif,serif,EmojiFont;color:#827876">De Rivieren Notarissen is een maatschap van besloten vennootschappen en natuurlijke personen met als doel de uitoefening van de notarispraktijk. De aansprakelijkheid van de (kandidaat-)notaris(sen) c.q. de besloten vennootschap(pen) is beperkt tot het bedrag waarvoor de beroepsaansprakelijkheidsverzekering in voorkomend geval de (kandidaat-)notaris(sen) aanspraak op uitkering geeft. Op de dienstverlening zijn van toepassing de algemene voorwaarden van Netwerk Notarissen, gedeponeerd bij de griffie van de Rechtbank in Utrecht. Deze zijn op verzoek kosteloos verkrijgbaar bij het notariskantoor en te raadplegen op de website. </span></div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black">&nbsp;</div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black"><span style="font-size:8pt;font-family:Arial,sans-serif,serif,EmojiFont;color:#827876"><strong>Netwerk Notarissen</strong> </span></div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black"><span style="font-size:8pt;font-family:Arial,sans-serif,serif,EmojiFont;color:#827876">De Rivieren Notarissen is aangesloten bij Netwerk Notarissen, een landelijk samenwerkingsverband van 160 zelfstandige notariskantoren. De samenwerking is gericht op kennisuitwisseling, juridisch onderzoek, vakopleiding, kwaliteitszorg en bedrijfsvoering. Dit e-mail bericht van De Rivieren Notarissen is uitsluitend bestemd voor de geadresseerde en kan privacygevoelige en/of vertrouwelijke informatie bevatten. Indien dit e-mail bericht niet aan u is gericht, dan wel abusievelijk aan u is verstuurd, dan wordt u hierbij verzocht het e-mail bericht te retourneren aan de afzender en het daarna te vernietigen. Gebruik van de informatie door anderen dan de geadresseerde, evenals openbaarmaking, reproductie en distributie zijn niet toegestaan zonder goedkeuring van de afzender en valt buiten de verantwoordelijkheid en de aansprakelijkheid van De Rivieren Notarissen.</span></div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black">&nbsp;</div>
+<div style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:black"><span style="font-size:24pt;font-family:Webdings,serif,EmojiFont;color:#339966">P</span> <span style="font-size:10pt;font-family:Arial,sans-serif,serif,EmojiFont;color:#827876"> Denk aan ons milieu voordat u besluit om deze mail te printen.</span></div>
+<img src="https://paars.notarisdossier.nl/v3/mark-email-as-read/ec573913-6908-430b-bb6e-a31b5e9cb4f5" width="1" height="1" alt="">
+<img src="https://u19203993.ct.sendgrid.net/wf/open?upn=u001.YACuX8RQyEhSCr7-2BqV60amj8RlKcwmoyW3-2BtJKWFIuUOTO4GvLxfe-2Bief-2BR49fHgH-2FbhCCALpq-2BNgbndd88tOVWIQekI5ugBCtUPgrYBEFaZWHtHmWqCEYsadQPS-2FQcE-2BZGAj0hHWJEALFgFTos1KCML5N74TohAr4WF2DjvaNMIRy22lCxKsqo-2Bz9qv3IrpMnSAfJ293A2Pq-2FLycsdJMA-3D-3D" alt="" width="1" height="1" border="0" style="height:1px!important;width:1px!important;border-width:0!important;margin-top:0!important;margin-bottom:0!important;margin-right:0!important;margin-left:0!important;padding-top:0!important;padding-bottom:0!important;padding-right:0!important;padding-left:0!important"></div>
+</blockquote></div></div></div>
+</body></html>
+
+--_001_e6ce89af-13ea-4feb-b36b-1d94d003f304_--
+
+--_000_2c136846-60a9-4460-9d86-752cefeaba02_--
