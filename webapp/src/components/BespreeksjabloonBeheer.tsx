@@ -38,9 +38,9 @@ import { Veld, Woordenveld } from "@/components/beheer-bouwstenen";
  * model. Daarom bewaart de backend bij elke opslag de vorige versie.
  */
 
-const LIJST_URL = "http://localhost:5678/webhook/bespreeksjablonen";
-const OPSLAAN_URL = "http://localhost:5678/webhook/bespreeksjabloon";
-const BRON_UPLOAD_URL = "http://localhost:5678/webhook/upload-bespreekformulier";
+const LIJST_URL = "/webhook/bespreeksjablonen";
+const OPSLAAN_URL = "/webhook/bespreeksjabloon";
+const BRON_UPLOAD_URL = "/webhook/upload-bespreekformulier";
 
 /** Kleine letters, geen cijfers of leestekens — zie `valideer()` voor het waarom. */
 const SOORT_PATROON = /^[a-z]{2,40}$/;

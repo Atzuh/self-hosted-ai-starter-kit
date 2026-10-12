@@ -20,6 +20,12 @@ export interface Classification {
 // Houd ze specifiek genoeg om geen false positives te krijgen.
 const BANK_KEYWORDS = [
   "passeeropdracht",
+  // ING levert de opdracht als 'notaris_instructie<nummer>.pdf' en noemt hem
+  // in het stuk zelf een invulinstructie. classifyFileName maakt van het
+  // streepje een spatie.
+  "notarisinstructie",
+  "notaris instructie",
+  "invulinstructie",
   "rabobank",
   "rabohypotheek",
   "stater",

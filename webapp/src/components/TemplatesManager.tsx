@@ -22,8 +22,8 @@ function templateUrl(bank: BankInfo): string | null {
   return `/templates/${bank.bank_id}/${encodeURIComponent(bank.template_filename)}`;
 }
 
-const DEFAULT_LIST_URL = "http://localhost:5678/webhook/templates";
-const DEFAULT_UPLOAD_URL = "http://localhost:5678/webhook/upload-template";
+const DEFAULT_LIST_URL = "/webhook/templates";
+const DEFAULT_UPLOAD_URL = "/webhook/upload-template";
 
 interface BankInfo {
   bank_id: string;

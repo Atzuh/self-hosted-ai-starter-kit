@@ -3,10 +3,11 @@ import type { RecentAkte } from "@/components/RecentAktes";
 /**
  * Basis-URL van de gegenereerde aktes. nginx serveert `shared/output/` op
  * `/output/` (zie nginx.conf) en levert daar een JSON-directorylisting via
- * `autoindex_format json`. Absoluut gehouden zodat het ook werkt vanaf de
- * dev-server (:5173) die cross-origin naar de stack (:8080) praat.
+ * `autoindex_format json`. Relatief, zodat de webapp onder elk adres werkt
+ * (localhost, of de Tailscale-naam van deze Mac); de dev-server stuurt het pad
+ * door naar de stack, zie vite.config.ts.
  */
-export const OUTPUT_BASE = "http://localhost:8080/output/";
+export const OUTPUT_BASE = "/output/";
 
 /** Eén entry uit de nginx `autoindex_format json`-listing. */
 interface NginxDirEntry {

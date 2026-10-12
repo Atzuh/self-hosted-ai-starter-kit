@@ -38,8 +38,8 @@ import { Tekstvlak, Veld, centenNaarEuro } from "@/components/beheer-bouwstenen"
  * terugdraaien, want beide schermen sturen het hele object mee.
  */
 
-const LIJST_URL = "http://localhost:5678/webhook/akteblokken";
-const OPSLAAN_URL = "http://localhost:5678/webhook/akteblok";
+const LIJST_URL = "/webhook/akteblokken";
+const OPSLAAN_URL = "/webhook/akteblok";
 
 const SOORT_PATROON = /^[a-z]{2,40}$/;
 const BLOK_ID_PATROON = /^[a-z0-9][a-z0-9-]{0,59}$/;

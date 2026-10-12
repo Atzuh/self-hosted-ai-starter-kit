@@ -8,7 +8,7 @@
  * workflow in plaats van een tijdsschatting.
  */
 
-export const JOB_STATUS_URL = "http://localhost:5678/webhook/job-status";
+export const JOB_STATUS_URL = "/webhook/job-status";
 
 /** Hoe vaak de status wordt opgevraagd. */
 const POLL_MS = 2000;

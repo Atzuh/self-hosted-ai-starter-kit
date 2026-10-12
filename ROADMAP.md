@@ -182,6 +182,39 @@ draaien.
 - [ ] Retrieval fijnslijpen (`score_threshold` tegen ruis, top-k afstellen).
 - [ ] Patroon uitrollen naar de andere drie specialisten (Vererving, Lasten, Object & partijen).
 
+### 🟡 Stap 2 (eerste deel) — Dossiers uit de koopovereenkomst (oktober 2026)
+Aanleiding: het aanbod van Springleaf voor het notariaat. Hun eerste flow —
+koopovereenkomst uitlezen en daar een dossier van maken — staat nu in Scriptor.
+NotarisDossier heeft geen import of API, dus het dossier dáár wordt nog met de
+hand aangemaakt; Scriptor neemt het lezen en overtypen weg.
+
+Keten: Dossiers-pagina → `/webhook/koopovereenkomst` (job-patroon) → Docling →
+twee smalle vragen aan `qwen2.5:7b` (partijen; object en afspraken) →
+`Bouw Dossier` → `shared/dossiers/<id>.json` als concept → nakijken in de webapp
+→ `Gecontroleerd`. Gemeten: ± 65 s per overeenkomst.
+
+Het model mag voorstellen, het document beslist:
+- kadastrale aanduiding en koopsom leest de code zelf uit de vaste formulering;
+- elk ander veld moet letterlijk in het document staan, anders komt het pad in
+  `twijfel` en kleurt het veld in de webapp; bevestigen kan pas als alles is
+  nagekeken;
+- bedragen in cijfers en letters ("zegge") worden tegen elkaar gelegd;
+- de overige controles (termijnvolgorde, 10% waarborgsom, art. 1:88 BW bij één
+  gehuwde verkoper) draaien in de browser en bewegen mee met correcties.
+
+Bestanden: [dossiers-workflow.json](n8n/demo-data/workflows/dossiers-workflow.json),
+[Dossiers.tsx](webapp/src/components/Dossiers.tsx),
+[DossierDetail.tsx](webapp/src/components/DossierDetail.tsx),
+[dossiers.ts](webapp/src/lib/dossiers.ts).
+
+**Nog open:**
+- [ ] **Meten op echte koopovereenkomsten.** Er zat er geen in de testdossiers;
+      getest is op een zelfgeschreven overeenkomst in NVM-opzet. Een geschreven
+      testdocument vleit het model (zie de les bij de toezeggingen-extractie).
+- [ ] Dossierlaag is bewust minimaal: JSON-bestanden, geen Postgres, geen login.
+      De akte- en analyseflow schrijven er nog niet naartoe.
+- [ ] Vervolg: leveringsakte uit het dossier, passeerklaar-controle, UBO/PEP/WWFT.
+
 ### ✅ Stap 5 (buiten de top-4) — Besprekingen → verslag, POC (augustus 2026)
 Spraakopname naar besprekingsverslag, volledig lokaal. Whisper draait — net als
 Ollama — **native op de host**, omdat Docker op macOS geen Metal doorgeeft.

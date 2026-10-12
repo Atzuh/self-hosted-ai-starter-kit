@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  ArrowLeft,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -47,9 +46,9 @@ import type { Aktesoort, Blok } from "@/components/AkteblokBeheer";
  * overgenomen velden worden daarom zichtbaar gemarkeerd.
  */
 
-const AKTEBLOKKEN_URL = "http://localhost:5678/webhook/akteblokken";
-const KANTOOR_URL = "http://localhost:5678/webhook/kantoor";
-const GENEREER_URL = "http://localhost:5678/webhook/testament";
+const AKTEBLOKKEN_URL = "/webhook/akteblokken";
+const KANTOOR_URL = "/webhook/kantoor";
+const GENEREER_URL = "/webhook/testament";
 
 const FASEN = ["Gegevens verzamelen", "Concept opmaken", "Offerte berekenen"];
 
@@ -98,10 +97,11 @@ function leegPersoon(): Persoon {
 
 export function TestamentBouwer({
   overdracht,
-  onBack,
+  kiezer,
 }: {
   overdracht: VerslagOverdracht | null;
-  onBack: () => void;
+  /** Keuzelijst voor de documentsoort, bovenaan het scherm. */
+  kiezer: React.ReactNode;
 }) {
   const [akte, setAkte] = useState<Aktesoort | null>(null);
   const [systeemvelden, setSysteemvelden] = useState<string[]>([]);
@@ -304,10 +304,7 @@ export function TestamentBouwer({
   if (laadFout || !akte) {
     return (
       <div className="mx-auto w-full max-w-[1100px] px-4 py-8 sm:px-8">
-        <Button variant="ghost" size="sm" onClick={onBack} className="mb-6">
-          <ArrowLeft className="h-3.5 w-3.5" />
-          Terug
-        </Button>
+        {kiezer}
         <div className="rounded-md border border-danger/30 border-l-4 border-l-danger bg-danger-pale p-4 text-sm">
           <div className="font-display font-bold text-ink-strong">Kan niet beginnen</div>
           <div className="mt-0.5 text-ink-soft">{laadFout}</div>
@@ -318,19 +315,10 @@ export function TestamentBouwer({
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 pb-16 pt-8 sm:px-8">
-      <Button variant="ghost" size="sm" onClick={onBack} className="mb-6">
-        <ArrowLeft className="h-3.5 w-3.5" />
-        Andere documentsoort
-      </Button>
+      {kiezer}
 
       <section className="mb-8">
-        <div className="mb-4 flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-sm border border-line-strong bg-surface/80 px-2 py-1 text-[10.5px] font-medium uppercase tracking-[0.14em] text-ink-soft">
-            <span className="h-1 w-1 rounded-full bg-seal" />
-            Testament
-          </span>
-        </div>
-        <h1 className="font-display text-[36px] font-medium leading-[1.05] text-ink-strong sm:text-[48px]">
+        <h1 className="font-display text-[44px] font-medium leading-[1.02] text-ink-strong sm:text-[64px]">
           Concept en offerte samenstellen
         </h1>
         {overdracht ? (

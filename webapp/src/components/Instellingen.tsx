@@ -13,8 +13,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-const GET_URL = "http://localhost:5678/webhook/kantoor";
-const SAVE_URL = "http://localhost:5678/webhook/kantoor-save";
+const GET_URL = "/webhook/kantoor";
+const SAVE_URL = "/webhook/kantoor-save";
 
 /**
  * Kantoorbrede standaardwaarden. Zie ook shared/kantoor.json en de nodes
@@ -187,11 +187,11 @@ export function Instellingen() {
 
   return (
     <div className="mx-auto max-w-[860px] px-4 py-8 sm:px-8">
-      <header className="mb-6">
-        <h1 className="font-display text-[26px] font-medium leading-tight tracking-tight text-ink-strong">
+      <header className="mb-8">
+        <h1 className="font-display text-[44px] font-medium leading-[1.02] text-ink-strong sm:text-[64px]">
           Instellingen
         </h1>
-        <p className="mt-1 text-sm text-ink-soft">
+        <p className="mt-4 text-[15.5px] leading-relaxed text-ink">
           Kantoor-specifieke standaardwaarden die in elke gegenereerde akte en offerte
           worden ingevuld.
         </p>

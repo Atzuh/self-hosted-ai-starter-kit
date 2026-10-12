@@ -16,6 +16,12 @@ shared/besprekingen/
 # Jobbestanden van lopende besprekingen (bevatten transcripten).
 shared/jobs/
 
+# Notamail en vragen van kantoorgenoten op het dashboard: kantoorinhoud, niet in git.
+shared/dashboard/
+
+# Dossiers uit koopovereenkomsten: persoons- en transactiegegevens, nooit in git.
+shared/dossiers/
+
 # Word-lockbestanden van geopende documenten.
 ~$*
 

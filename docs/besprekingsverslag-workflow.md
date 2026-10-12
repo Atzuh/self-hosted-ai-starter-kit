@@ -35,7 +35,7 @@ flowchart TD
 ```
 
 Er zijn **vier momenten waarop een model wordt aangeroepen**: Whisper voor de
-transcriptie, en daarna qwen2.5:7b in drie rollen — per blok, voor het verslag,
+transcriptie, en daarna qwen3.5:4b in drie rollen — per blok, voor het verslag,
 en voor gerichte nacontrole. Alles daartussen is gewone code.
 
 De verdeling van werk is een bewuste keuze: **het model levert inhoud, de code
@@ -67,7 +67,7 @@ ouder zijn dan 24 uur.
 
 ### Prepare Audio
 Leest de multipart-upload uit: één WAV plus de velden `dossier`, `onderwerp`,
-`deelnemers`, `datum`, `duur_seconden`, `soort` en `context`. In plaats van audio mag ook een
+`behandelaar`, `deelnemers`, `datum`, `duur_seconden`, `soort` en `context`. In plaats van audio mag ook een
 kant-en-klaar `transcript` mee — dan wordt Whisper overgeslagen (zo test je de
 samenvatting zonder transcriptieruis).
 
@@ -75,6 +75,12 @@ Het veld **`context`** is de vrije waarneming van de behandelaar: wat je niet ui
 de opname kunt horen maar wel bij het dossier hoort ("mevrouw is 88 en stottert",
 "de heer voerde vrijwel het hele gesprek"). Die tekst gaat drie kanten op, en
 bewust niet naar Whisper — zie [§5.6](#56-waarnemingen-van-de-behandelaar).
+
+**`behandelaar`** en **`deelnemers`** (de cliënten) komen apart binnen. Samen
+vormen ze het kopje *Aanwezig*; gescheiden gaan ze de prompts in, zodat het model
+weet over wie het verslag gaat — zie [§5.7](#57-rolverdeling). Ontbreekt
+`behandelaar` (ouder formulier, script), dan geldt een deelnemer met "mr." of een
+functie vóór de naam als behandelaar.
 
 Bepaalt ook het **soort bespreking**. Staat `soort` niet vast, dan wordt het
 onderwerp vergeleken met `herken_op` uit de sjablonen, waarbij het *langste*
@@ -88,8 +94,36 @@ Maakt het jobbestand aan en ruimt oude op.
 timeout 20 minuten. De server draait native op de Mac (Metal); zie
 `shared/whisper/start-whisper-server.sh` voor model en VAD-instellingen.
 
+De server draait met **`--max-context 0`**: elk venster wordt los getranscribeerd,
+zonder de eerder geschreven tekst als context. Die context is waar
+herhalingslussen uit ontstaan. Gemeten op een levenstestamentbespreking van 35
+minuten:
+
+| instelling | woorden | lussen |
+|---|---|---|
+| met context (oud) | 3.129 | 2, plus 15× "Ja." |
+| met context, prompt zonder labels | 2.178 | 125× "Ja." |
+| `--max-context 0` | 3.833 | 0 |
+| idem, VAD-drempel 0,3 en ruimere padding | 3.893 | 0 |
+| alleen de prompt als context (`--carry-initial-prompt`, `-mc 40`) | 3.446 | 0 |
+
+Wat terugkwam was precies wat in het verslag ontbrak: de opsomming over de omvang
+van de volmacht en de antwoorden van de cliënten. Die leken te zacht te zijn
+opgenomen, maar zaten gewoon in de opname. De prijs: de initial prompt
+([§5.1](#51-whisper--initial-prompt)) doet niets meer.
+
 ### Extract Transcript
-Knipt het transcript in blokken van 9.000 tekens, op zinseinde. Eén blok ≈ een
+Schoont het transcript eerst op, in code:
+
+- **Sprekerlabels eruit.** Stond er "Aanwezig: …" in de initial prompt, dan nam
+  Whisper dat woord over als label vóór elke beurt (101 keer in 35 minuten). Komt
+  zo'n label drie keer of vaker voor, dan verdwijnt het.
+- **Herhalingen samenvoegen.** Drie of meer gelijke zinnen op rij worden er één.
+  Bij een inhoudelijke zin blijft `[9× herhaald]` staan en komt er een
+  waarschuwing in het resultaat: daar ontbreekt gesproken tekst. Een rij
+  "Ja. Ja. Ja." krimpt zonder markering.
+
+Knipt het transcript daarna in blokken van 9.000 tekens, op zinseinde. Eén blok ≈ een
 kwartier spreektijd en past ruim in de 8.192 tokens context. Is er maar één blok,
 dan gaat het transcript rechtstreeks naar de verslagprompt.
 
@@ -103,8 +137,19 @@ herkennen in de samenvatstap al waren weggevallen.
 Elk blok krijgt een deterministische hint mee: welke kopjes hebben hier een
 trefwoord staan? Puur op tekstvergelijking, zonder model.
 
+`Collect Blok Samenvattingen` ruimt per deel op vóór het samenvoegen: een zin die
+onder drie of meer kopjes staat is opvulling en verdwijnt, een zin onder twee
+kopjes blijft alleen onder het eerste, "Er wordt gekeken naar de situatie
+waarbij…" gaat weg, en er blijven hooguit zes punten per kopje over.
+
 ### Build Verslag Prompt → Verslag LLM Chain (reduce)
 Bouwt het eindverslag uit óf het hele transcript, óf de deelsamenvattingen.
+
+Bij een lange bespreking mét sjabloon vraagt deze ronde **alleen titel,
+samenvatting, afspraken en open vragen**. De kopjes zijn dan al door de blokken
+gevuld en Orden Secties neemt die als bron; ze nog eens laten uitschrijven was
+dubbel werk en liet het antwoord tegen de uitvoerlimiet lopen. De `VASTE INDELING`
+en het veld `onderwerpen` uit §5.4 gelden dus alleen voor een korte bespreking.
 
 ### Orden Secties
 Het inhoudelijke hart, en volledig code. Hier gebeurt:
@@ -120,7 +165,15 @@ Het inhoudelijke hart, en volledig code. Hier gebeurt:
    begint een punt met een ontkenning en blijft er ná het wegstrepen van de
    kopwoorden niets inhoudelijks over, dan is het kopje leeg. "Geen bewind; wel een
    toelichting in het concept" houdt wél inhoud over en blijft dus staan.
-5. **`ter_sprake` markeren** — een kopje dat leeg bleef terwijl zijn trefwoord wél
+   Dezelfde echo komt ook in stukjes: uit "Medisch aanspreekpunt,
+   behandelverklaringen, wel of niet reanimeren" maakte het model vier losse
+   punten. Een kort punt dat uit woorden van een aanwijzing bestaat die in het
+   gesprek zelf niet zijn gevallen, gaat eruit — net als "Geen inboedel" wanneer
+   het woord inboedel nergens in het transcript staat, een los trefwoord
+   ("Kosten") en een etiket zonder inhoud ("Planning: niet genoemd").
+5. **Restpost ontdubbelen** — wat al onder een ander kopje staat, hoeft niet nog
+   eens onder het laatste.
+6. **`ter_sprake` markeren** — een kopje dat leeg bleef terwijl zijn trefwoord wél
    in het transcript valt, krijgt een markering. Typisch als ergens van wordt
    afgezien ("de vaccinatieclausule? nee, laat maar zitten").
 
@@ -132,12 +185,28 @@ drie stukken). Klein en gefocust, in plaats van nog eens het hele transcript.
 Een sjabloonsectie kan ook `altijd_nacontrole: true` krijgen; op dit moment
 gebruikt geen enkele sectie dat.
 
+`Merge Nacontrole` past hetzelfde echo-filter toe als Orden Secties. Hier was het
+het hardst nodig: de nacontrole krijgt de aanwijzing van het kopje mee en gaf die
+terug als antwoord ("…bijvoorbeeld de kinderen samen", bij cliënten zonder
+kinderen).
+
 ### Controleer Getallen
 Elk getal in het verslag moet terug te vinden zijn in het transcript. Lastig punt:
 Whisper schrijft getallen nu eens als cijfer ("60%", "2008") en dan weer voluit
 ("vierhonderdvijftigduizend"). Daarom wordt van elk getal ook de Nederlandse
 woordvorm gemaakt en dáárop gezocht. Wat niet terug te vinden is, wordt in het
 DOCX gemarkeerd.
+
+Dezelfde node markeert een **rolverwisseling**: een zin die iets persoonlijks aan
+de notaris of behandelaar toeschrijft ("de broer van de notaris", "ziekte van
+Huntington (bij de notaris)"). Niet herschrijven — wie er werkelijk bedoeld is,
+weet alleen de behandelaar.
+
+### Build Bespreking Response
+Schrijft het resultaat in het jobbestand, met de waarschuwingen. Twee daarvan gaan
+over het transcript zelf: het aantal herhalingslussen, en een dun transcript
+(minder dan 105 woorden per minuut, waar een gesprek er 130 tot 160 haalt). Een
+verslag kan er verzorgd uitzien terwijl de helft van het gesprek er niet in zit.
 
 ### Generate Verslag DOCX
 `python3 /data/shared/genereer_besprekingsverslag.py --args-file …`. De argumenten
@@ -148,15 +217,40 @@ transcript cliëntgegevens bevat.
 
 ## 4. Modelinstellingen
 
-Alle drie de chains draaien op **qwen2.5:7b** via Ollama, native op de Mac.
+De drie modelstappen draaien op **qwen3.5:4b** via Ollama, native op de Mac. Ze
+roepen Ollama **rechtstreeks** aan met een HTTP Request-node
+(`POST http://host.docker.internal:11434/api/chat`), niet via de Ollama-node van
+n8n. De nodes heten nog "… LLM Chain", zodat alle verwijzingen blijven kloppen.
 
-| chain | temperature | numPredict | numCtx | keepAlive |
+Waarom rechtstreeks: qwen3.5 denkt standaard hardop, en dat kan alleen uit met
+`think: false` in de aanroep. De Ollama-node van n8n 2.14.2 laat die sleutel
+vallen, ook als hij in de workflow staat; het model schrijft dan zijn denkproces
+als antwoord ("Unexpected token 'T', Thinking P…"). `/no_think` in de prompt en
+een eigen Modelfile-variant helpen niet.
+
+| stap | temperature | num_predict | num_ctx | keep_alive |
 |---|---|---|---|---|
-| Blok | 0 | 1024 | 8192 | 30m |
-| Verslag | 0.1 | 2048 | 8192 | 30m |
-| Nacontrole | 0 | 512 | 8192 | 30m |
+| Blok | 0 | 2048 | 8192 | 5m |
+| Verslag | 0.1 | 2048 | 8192 | 5m |
+| Nacontrole | 0 | 512 | 8192 | 5m |
 
-Alle drie met `format: json`. Twee valkuilen die hier zijn ingelopen:
+`keep_alive` is kort gehouden: akte en analyse draaien op qwen2.5:7b, en twee
+modellen tegelijk in het geheugen is op 16 GB te veel.
+
+**Alleen de bespreking gebruikt qwen3.5:4b.** Gemeten op 7-10-2026 op dossier
+2026.2270: in de akte spelde het de naam van de tweede cliënt fout
+("VAN WIGGEN-VEEEN") en vulde het een tekstblok minder; in de analyse zag het de
+bank aan voor cliënt 1 en miste het de echte kritieke bevinding. Voor het
+samenvatten van een gesprek is het wél beter dan qwen2.5:7b: het houdt uit elkaar
+wie welke ziekte heeft en levert bruikbare afspraken en open vragen.
+
+Het antwoord staat als tekst in `message.content`; de parse-nodes lezen dat.
+Bijvangst van de rechtstreekse aanroep: is die tekst afgekapt (uitvoerlimiet, of
+het model valt in herhaling), dan redt `Collect Blok Samenvattingen` wat er stond
+en meldt het resultaat dat. Via de Ollama-node viel bij ongeldige JSON het hele
+deel weg.
+
+Alle drie met `format: json`. Twee valkuilen uit de tijd van de Ollama-node, die voor akte en analyse nog gelden:
 
 - **`numCtx` moet in camelCase.** De n8n-node negeert een andere schrijfwijze
   stilzwijgend en valt terug op 2048, waarna lange prompts onzichtbaar worden
@@ -167,6 +261,13 @@ Alle drie met `format: json`. Twee valkuilen die hier zijn ingelopen:
 `numPredict` stond ooit op 512 voor de blokken; dat kapte de JSON middenin af en
 kostte de hele run.
 
+Een hogere `numPredict` helpt niet tegen de andere manier waarop een blok
+sneuvelt: het model valt in herhaling en schrijft dezelfde zin tot de uitvoer vol
+is. Dat gebeurde in de lijst `afspraken`, toen die een open omschrijving zonder
+maximum had. Met `format: json` is een afgekapt antwoord ongeldige JSON en valt
+het hele deel weg (het resultaat meldt dat). Begrens daarom elke lijst in de
+prompt.
+
 ---
 
 ## 5. De prompts, letterlijk
@@ -174,8 +275,13 @@ kostte de hele run.
 ### 5.1 Whisper — initial prompt
 
 ```
-Notariële bespreking. Onderwerp: ${onderwerp}. Aanwezig: ${deelnemers}.
+Notariële bespreking. ${onderwerp}. Gesprek tussen ${behandelaar}, ${cliënten}.
 ```
+
+**Let op: sinds de server met `--max-context 0` draait, gebruikt Whisper deze
+prompt niet meer.** Hij gaat nog mee voor wie de server anders start. Gewone
+zinnen en geen "Label: waarde": de vorige versie eindigde op
+"Aanwezig: ${deelnemers}." en Whisper zette dat woord daarna vóór elke beurt.
 
 Kort, en bewust **zonder lijst van vaktermen**. Gemeten op een echte bespreking
 van 55 minuten kostte zo'n lijst van 29 termen 900 woorden inhoud (5.620 tegen
@@ -196,6 +302,9 @@ Hieronder staat deel ${i} van ${totaal} van een automatisch transcript van een n
 
 Orden wat er in DIT deel is besproken onder de vaste kopjes hieronder. Gebruik uitsluitend wat er staat; verzin niets.
 
+ROLLEN
+... (zie §5.7)
+
 KOPJES (de tekst achter de dubbele punt is een aanwijzing voor jou — schrijf die nooit over als inhoud)
 - Familiesituatie: ${aanwijzing}
 - Vermogenssituatie: ${aanwijzing}
@@ -205,9 +314,15 @@ LET OP — in dit deel vallen woorden die horen bij: ${raakkopjes}. Kijk of die 
 
 REGELS
 - Schrijf wat er over het onderwerp is gezegd, met de inhoud erbij.
-- Een kopje blijft alleen leeg als het onderwerp helemaal niet ter sprake kwam.
+- In één deel komen maar een paar kopjes aan bod. Vul een kopje alleen met wat de cliënten erover vertelden of kozen; alle andere kopjes blijven een lege lijst. Verzin geen punt om een kopje te vullen.
+- Schrijf de uitkomst op, niet dát erover is gesproken. Niet "Er wordt besproken dat…" of "Er wordt gekeken naar…", maar wat er is gezegd of gekozen.
+- Zet hetzelfde punt nooit onder twee kopjes.
 - Hooguit zes punten per kopje, één korte zin per punt.
 - Noem concrete namen, bedragen en percentages als die vallen; juist die maken het punt bruikbaar.
+- Staat er "[9× herhaald]" of iets dergelijks, dan liep de transcriptie daar vast en ontbreekt er tekst. Maak daar geen punt van.
+- Een punt is een hele zin die zegt wat er is verteld of besloten. Een los trefwoord of een rijtje onderwerpen is geen punt.
+- "afspraken": alleen wat iemand ná dit gesprek nog gaat doen. Wat de cliënten kiezen of willen hoort onder een kopje. Hooguit vijf, geen enkele twee keer; niets afgesproken is een lege lijst.
+- "namen": de namen van personen die in dit deel vallen.
 - Twijfel je onder welk kopje iets hoort, kies dan het meest specifieke kopje dat past. Gebruik "${laatsteKop}" alleen als het echt nergens onder valt.
 
 Geef alleen geldige JSON terug:
@@ -217,8 +332,8 @@ Geef alleen geldige JSON terug:
     "Vermogenssituatie": [],
     ...
   },
-  "afspraken": ["afspraken die in dit deel zijn gemaakt"],
-  "namen": ["namen of rollen die in dit deel vallen"]
+  "afspraken": [],
+  "namen": []
 }
 
 TRANSCRIPT-DEEL
@@ -229,6 +344,11 @@ De aanwijzingen staan er **voluit** in, niet afgekort. Met korte hints zakte het
 aantal gevulde kopjes van 11 naar 8 en belandden de legaten weer onder "Overige".
 De prompt wordt er groot van (~12.600 tekens), maar sinds de blokken één voor één
 draaien is dat geen probleem.
+
+De lijsten `afspraken` en `namen` staan **leeg in het schema** en worden in de
+regels uitgelegd. Een omschrijving ín het schema schrijft dit model terug als
+inhoud; een open omschrijving zonder maximum liet het alle keuzes van de cliënten
+als afspraak opsommen tot de uitvoer vol was.
 
 `${laatsteKop}` komt uit het sjabloon en is niet hardgecodeerd — anders breekt het
 zodra de restpost wordt hernoemd.
@@ -267,10 +387,12 @@ HARDE REGELS
 - Schrijf in zakelijk Nederlands, derde persoon, verleden tijd.
 - Geef alleen geldige JSON terug, zonder toelichting eromheen.
 
+ROLLEN
+... (zie §5.7)
+
 CONTEXT
 Onderwerp volgens de behandelaar: ${onderwerp}
 Dossiernummer: ${dossier}
-Bekende deelnemers: ${deelnemers}
 
 VASTE INDELING (${sjabloonnaam})
 Vul "onderwerpen" met exact deze kopjes, in deze volgorde, en gebruik de kop letterlijk zoals hier geschreven. Wat wel is besproken maar nergens onder valt, hoort onder het laatste kopje.
@@ -286,9 +408,9 @@ Een kopje krijgt alleen een lege lijst als het onderwerp helemaal niet ter sprak
 JSON-SCHEMA
 {
   "titel": "korte titel van de bespreking",
-  "samenvatting": "Begin met waaróver de bespreking ging en wat de uitkomst was — bijvoorbeeld: het bestaande testament is doorgenomen en blijft in stand, met één wijziging: de voogdij. Daarna 4 tot 7 zinnen met de hoofdpunten. Som geen kopjes op.",
+  "samenvatting": "Begin met waaróver de bespreking ging en wat de cliënten willen regelen. Daarna 4 tot 7 zinnen met de hoofdpunten: wat is gekozen, wat staat nog open. Som geen kopjes op en noem alleen uitkomsten die in het materiaal staan.",
   "onderwerpen": [{"kop": "onderwerp", "punten": ["wat er over gezegd is"]}],
-  "afspraken": ["concrete afspraken die zijn gemaakt"],
+  "afspraken": ["wie na dit gesprek wat gaat doen — één actie per regel, met de inhoud erbij"],
   "open_vragen": ["vragen die in de bespreking onbeantwoord bleven"]
 }
 
@@ -298,6 +420,11 @@ ${transcript}
 
 Bij een lange bespreking staat er in plaats van `TRANSCRIPT` het kopje
 `SAMENVATTINGEN PER DEEL (de bespreking is in ${n} delen samengevat)`.
+
+**Geen voorbeeldzinnen in het schema.** Bij de samenvatting stond er één ("het
+bestaande testament is doorgenomen en blijft in stand, met één wijziging: de
+voogdij") en het model schreef die over als uitkomst van een bespreking waarin
+het testament niet eens op tafel lag.
 
 De aanwijzing over volgorde staat er wel in, maar de volgorde wordt daarna
 alsnog in code afgedwongen. Deze regel dient om de inhoud onder het juiste kopje
@@ -312,10 +439,14 @@ Hieronder staan fragmenten uit een transcript van een notariële bespreking.
 
 VRAAG
 Wat is er in deze bespreking gezegd over: ${kop}?
-Daaronder valt: ${aanwijzing}
+Ter oriëntatie, wat er onder dit kopje kán vallen (dit is geen antwoord; neem er niets uit over dat niet in de fragmenten staat): ${aanwijzing}
+
+ROLLEN
+... (zie §5.7)
 
 REGELS
 - Antwoord alleen op basis van de fragmenten. Verzin niets.
+- Schrijf op wat de cliënten hierover zeiden of kozen, met de inhoud erbij. Een opsomming van onderwerpen is geen antwoord.
 - Gaat het onderwerp in deze fragmenten ergens anders over, geef dan een lege lijst.
 - Hooguit drie korte zinnen.
 
@@ -331,12 +462,12 @@ ${fragment}
 ```
 
 Een sjabloonsectie mag een eigen `vraag` meegeven; dan vervangt die de
-standaardvraag en vervalt de regel "Daaronder valt: …".
+standaardvraag en vervalt de regel "Ter oriëntatie…".
 
 Het antwoord wordt streng gefilterd voordat het in het verslag komt: punten
 korter dan 9 tekens vallen af, net als antwoorden die óver de vraag gaan in plaats
 van erop ("bevindt zich niet in de gegeven fragmenten") of die alleen de kop
-herhalen. Liever een kopje dat gemarkeerd blijft als "kwam ter sprake" dan een
+herhalen, en punten die een echo van een sjabloon-aanwijzing zijn. Liever een kopje dat gemarkeerd blijft als "kwam ter sprake" dan een
 schijnantwoord in het verslag.
 
 ### 5.6 Waarnemingen van de behandelaar
@@ -372,6 +503,26 @@ Twee keer staat er in de prompt dat het geen besproken punt is, en toch filtert
 hetzelfde vangnet als voor de aanwijzingen, om dezelfde reden: dit model schrijft
 achtergrondtekst geregeld over als inhoud, en de waarneming staat verderop toch al
 in het verslag.
+
+### 5.7 Rolverdeling
+
+Het transcript vermeldt geen sprekers. Zonder uitleg wist het model niet over wie
+het verslag ging: bij een levenstestament schreef het de ziekte en de broer van
+de cliënt aan de notaris toe. Dit blok staat daarom in de blokprompt, de
+verslagprompt en de nacontroleprompt — ook als er geen namen zijn ingevuld, want
+de rolverdeling zelf is het punt:
+
+```
+ROLLEN
+- Behandelaar (${behandelaar}): medewerker van het notariskantoor. Stelt de vragen en legt de wet uit.
+- Cliënten (${cliënten}): over hén gaat het verslag — hun familie, gezondheid, vermogen, wensen en keuzes.
+- Het transcript zegt niet wie er spreekt. Wie uitlegt en vragen stelt is de behandelaar; wie over het eigen leven vertelt is een cliënt.
+- Schrijf nooit iets toe aan de behandelaar of "de notaris" dat over het leven van een mens gaat (ziekte, broer, partner, testament, wensen). Dat gaat altijd over een cliënt; schrijf dan "cliënt" of "cliënten".
+- Algemene uitleg van de behandelaar over de wet of over wat er mogelijk is, is geen keuze van de cliënten. Noteer wat voor déze cliënten geldt of wat zij willen.
+```
+
+Het vangnet in code staat in Controleer Getallen: gaat het toch mis, dan krijgt
+de zin een markering.
 
 ---
 

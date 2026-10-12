@@ -21,9 +21,9 @@ import { jobIdVanAntwoord, wachtOpJob } from "@/lib/job-status";
 import { cn } from "@/lib/utils";
 import type { VerslagOverdracht } from "@/components/TestamentBouwer";
 
-const START_URL = "http://localhost:5678/webhook/bespreking";
+const START_URL = "/webhook/bespreking";
 /** Verslag opnieuw genereren met de aanvullingen van de behandelaar. */
-const AANVULLEN_URL = "http://localhost:5678/webhook/bespreking-aanvullen";
+const AANVULLEN_URL = "/webhook/bespreking-aanvullen";
 
 /**
  * Onthoudt de gekozen microfoon tussen sessies. Wie een externe microfoon
@@ -31,6 +31,8 @@ const AANVULLEN_URL = "http://localhost:5678/webhook/bespreking-aanvullen";
  * uit zichzelf lang niet altijd het juiste apparaat.
  */
 const MIC_OPSLAG_SLEUTEL = "scriptor.microfoon";
+/** De behandelaar is per werkplek vrijwel altijd dezelfde; onthouden scheelt typen. */
+const BEHANDELAAR_OPSLAG_SLEUTEL = "scriptor.behandelaar";
 
 const FASEN = [
   "Opname voorbereiden",
@@ -72,7 +74,7 @@ interface Onderwerp {
  * laden opgehaald in plaats van hier vastgelegd. Een nieuw sjabloon verschijnt
  * zo vanzelf in de keuzelijst. Dit blijft de terugval als die aanroep niet lukt.
  */
-const SJABLONEN_URL = "http://localhost:5678/webhook/bespreeksjablonen";
+const SJABLONEN_URL = "/webhook/bespreeksjablonen";
 
 const AUTO_SOORT = { waarde: "auto", label: "Automatisch (op basis van het onderwerp)" };
 const VRIJE_SOORT = { waarde: "algemeen", label: "Geen vaste indeling" };
@@ -119,6 +121,13 @@ export function Besprekingen({
   const [dossier, setDossier] = useState("");
   const [onderwerp, setOnderwerp] = useState("");
   const [deelnemers, setDeelnemers] = useState("");
+  const [behandelaar, setBehandelaar] = useState<string>(() => {
+    try {
+      return window.localStorage.getItem(BEHANDELAAR_OPSLAG_SLEUTEL) ?? "";
+    } catch {
+      return "";
+    }
+  });
   const [soort, setSoort] = useState("auto");
   const [soorten, setSoorten] = useState(SOORTEN_TERUGVAL);
   const [context, setContext] = useState("");
@@ -355,6 +364,12 @@ export function Besprekingen({
       formData.append("dossier", dossier.trim());
       formData.append("onderwerp", onderwerp.trim());
       formData.append("deelnemers", deelnemers.trim());
+      formData.append("behandelaar", behandelaar.trim());
+      try {
+        window.localStorage.setItem(BEHANDELAAR_OPSLAG_SLEUTEL, behandelaar.trim());
+      } catch {
+        // Geen opslag beschikbaar: dan vult de behandelaar het de volgende keer opnieuw in.
+      }
       formData.append("soort", soort);
       formData.append("context", context.trim());
       formData.append("duur_seconden", String(duurSeconden));
@@ -399,7 +414,7 @@ export function Besprekingen({
     } finally {
       setBezig(false);
     }
-  }, [audio, dossier, onderwerp, deelnemers, soort, context, stopPollen]);
+  }, [audio, dossier, onderwerp, deelnemers, behandelaar, soort, context, stopPollen]);
 
   /**
    * Stuurt de aanvullingen naar n8n, dat het verslag opnieuw door
@@ -463,11 +478,11 @@ export function Besprekingen({
 
   return (
     <div className="mx-auto max-w-[900px] px-4 py-8 sm:px-8">
-      <header className="mb-6">
-        <h1 className="font-display text-[26px] font-medium leading-tight tracking-tight text-ink-strong">
+      <header className="mb-8">
+        <h1 className="font-display text-[44px] font-medium leading-[1.02] text-ink-strong sm:text-[64px]">
           Besprekingen
         </h1>
-        <p className="mt-1 text-sm text-ink-soft">
+        <p className="mt-4 text-[15.5px] leading-relaxed text-ink">
           Neem de bespreking op, of upload een geluidsbestand. Scriptor maakt lokaal een
           transcript en werkt dat uit tot een verslag met de besproken punten en afspraken.
         </p>
@@ -610,19 +625,28 @@ export function Besprekingen({
               </select>
             </Veld>
           </div>
-          <div className="sm:col-span-2">
-            <Veld
-              label="Deelnemers"
-              hint="Bepaalt wie er onder 'Aanwezig' in het verslag komt te staan — alleen deze namen. Laat leeg om het kopje weg te laten. Scheid met komma's."
-            >
-              <Input
-                value={deelnemers}
-                onChange={(e) => setDeelnemers(e.target.value)}
-                placeholder="mr. Van Dijk, de heer Jansen, mevrouw De Vries"
-                disabled={bezig}
-              />
-            </Veld>
-          </div>
+          <Veld
+            label="Behandelaar"
+            hint="Wie het gesprek namens kantoor voert. Het model weet dan dat het verslag niet over deze persoon gaat."
+          >
+            <Input
+              value={behandelaar}
+              onChange={(e) => setBehandelaar(e.target.value)}
+              placeholder="mr. Van Dijk"
+              disabled={bezig}
+            />
+          </Veld>
+          <Veld
+            label="Cliënten"
+            hint="Over hen gaat het verslag. Staan samen met de behandelaar onder 'Aanwezig'. Scheid met komma's."
+          >
+            <Input
+              value={deelnemers}
+              onChange={(e) => setDeelnemers(e.target.value)}
+              placeholder="de heer Jansen, mevrouw De Vries"
+              disabled={bezig}
+            />
+          </Veld>
           <div className="sm:col-span-2">
             <Veld
               label="Waarnemingen (optioneel)"

@@ -1,17 +1,20 @@
 import { useState } from "react";
 
 import { Dashboard } from "@/components/Dashboard";
+import { Dossiers } from "@/components/Dossiers";
 import { GeneratorSection } from "@/components/GeneratorSection";
 import { AkteControle } from "@/components/AkteControle";
 import { Besprekingen } from "@/components/Besprekingen";
 import { TemplatesManager } from "@/components/TemplatesManager";
 import { Instellingen } from "@/components/Instellingen";
 import { AppHeader } from "@/components/AppHeader";
+import { AppSidebar } from "@/components/AppSidebar";
 import { AppFooter } from "@/components/AppFooter";
 import type { VerslagOverdracht } from "@/components/TestamentBouwer";
 
 export type AppPage =
   | "dashboard"
+  | "dossiers"
   | "controle"
   | "generator"
   | "besprekingen"
@@ -29,31 +32,33 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen flex-col bg-paper">
-      <AppHeader
-        currentPage={page}
-        onNavigate={setPage}
-      />
+      <AppHeader onNavigate={setPage} />
 
-      <main className="flex-1">
-        {page === "dashboard" && <Dashboard onNavigate={setPage} />}
-        {page === "controle" && <AkteControle />}
-        {page === "generator" && (
-          <GeneratorSection
-            overdracht={overdracht}
-            onOverdrachtGebruikt={() => setOverdracht(null)}
-          />
-        )}
-        {page === "besprekingen" && (
-          <Besprekingen
-            onNaarTestament={(o) => {
-              setOverdracht(o);
-              setPage("generator");
-            }}
-          />
-        )}
-        {page === "templates" && <TemplatesManager />}
-        {page === "instellingen" && <Instellingen />}
-      </main>
+      <div className="flex flex-1 flex-col md:flex-row">
+        <AppSidebar currentPage={page} onNavigate={setPage} />
+
+        <main className="min-w-0 flex-1">
+          {page === "dashboard" && <Dashboard onNavigate={setPage} />}
+          {page === "dossiers" && <Dossiers />}
+          {page === "controle" && <AkteControle />}
+          {page === "generator" && (
+            <GeneratorSection
+              overdracht={overdracht}
+              onOverdrachtGebruikt={() => setOverdracht(null)}
+            />
+          )}
+          {page === "besprekingen" && (
+            <Besprekingen
+              onNaarTestament={(o) => {
+                setOverdracht(o);
+                setPage("generator");
+              }}
+            />
+          )}
+          {page === "templates" && <TemplatesManager />}
+          {page === "instellingen" && <Instellingen />}
+        </main>
+      </div>
 
       <AppFooter
         version="0.1.0"

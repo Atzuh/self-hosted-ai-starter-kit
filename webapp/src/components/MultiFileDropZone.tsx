@@ -36,13 +36,6 @@ interface MultiFileDropZoneProps {
   files: File[];
   onChange: (files: File[]) => void;
   /**
-   * "dossier"   — map-first: hele dossiermap uploaden (akte-modus).
-   * "documenten" — bestand-first: losse PDF/Word-documenten uploaden
-   *   (analyse-modus). Het grote klikvlak opent dan direct de
-   *   bestandskiezer; de map-optie blijft beschikbaar als knop.
-   */
-  variant?: "dossier" | "documenten";
-  /**
    * Uitgevinkte submappen (sleutels uit `fileGroupKey`). Bestanden in deze
    * groepen blijven zichtbaar maar gaan niet mee in de upload. De eigenaar
    * van deze state is de parent, zodat die de upload kan filteren.
@@ -130,11 +123,9 @@ function dedupeFiles(existing: File[], incoming: File[]): File[] {
 export function MultiFileDropZone({
   files,
   onChange,
-  variant = "dossier",
   excludedGroups = EMPTY_SET,
   onExcludedGroupsChange,
 }: MultiFileDropZoneProps) {
-  const isDocsMode = variant === "documenten";
   const [metaMap, setMetaMap] = useState<Map<File, FileMeta>>(new Map());
   const [isDragOver, setIsDragOver] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
@@ -282,12 +273,8 @@ export function MultiFileDropZone({
 
   const hasFiles = files.length > 0;
 
-  // In document-modus opent het grote klikvlak direct de bestandskiezer
-  // (losse PDF/Word). In dossier-modus opent het de map-kiezer.
-  const openPrimaryPicker = () => {
-    if (isDocsMode) inputRef.current?.click();
-    else folderInputRef.current?.click();
-  };
+  // Het grote klikvlak opent de map-kiezer; losse bestanden gaan via de knop.
+  const openPrimaryPicker = () => folderInputRef.current?.click();
 
   return (
     <div className="space-y-3">
@@ -347,8 +334,6 @@ export function MultiFileDropZone({
             />
           ) : hasFiles ? (
             <UploadCloud className="h-4 w-4" strokeWidth={1.75} />
-          ) : isDocsMode ? (
-            <FileText className="h-7 w-7" strokeWidth={1.5} />
           ) : (
             <Folder className="h-7 w-7" strokeWidth={1.5} />
           )}
@@ -363,63 +348,42 @@ export function MultiFileDropZone({
           {isScanning
             ? "Dossiermap doorzoeken…"
             : hasFiles
-              ? isDocsMode
-                ? "Voeg nog meer documenten toe"
-                : "Voeg nog meer toe of sleep een andere map"
-              : isDocsMode
-                ? "Sleep documenten hierheen"
-                : "Sleep de dossiermap hierheen"}
+              ? "Voeg nog meer toe of sleep een andere map"
+              : "Sleep de dossiermap hierheen"}
         </div>
 
         {!hasFiles && (
           <p className="mx-auto mb-5 mt-1.5 max-w-md text-[13.5px] leading-relaxed text-ink-soft">
-            {isDocsMode
-              ? "Eén of meer losse stukken — bijv. alleen een BRP-inzage. PDF en Word (.docx). Een (sub)map kan ook; daarna vink je per submap aan wat meegaat."
-              : "Na het inlezen vink je per submap aan wat meegaat — alleen die bestanden worden verwerkt. Losse bestanden toevoegen kan ook. PDF en Word (.docx)."}
+            Na het inlezen vink je per submap aan wat meegaat — alleen die
+            bestanden worden verwerkt. Losse bestanden toevoegen kan ook. PDF en
+            Word (.docx).
           </p>
         )}
 
         <div className="mt-3 flex items-center justify-center gap-2 text-[11.5px] text-ink-mute">
           <span>of</span>
-          {(() => {
-            const primaryClass =
-              "inline-flex items-center gap-1.5 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-strong transition-colors hover:border-azure/50 hover:bg-azure-pale/40 hover:text-azure-glow";
-            const secondaryClass =
-              "inline-flex items-center gap-1.5 rounded-md border border-line bg-surface/60 px-3 py-1.5 text-[12.5px] font-medium text-ink-soft transition-colors hover:border-line-strong hover:bg-wash hover:text-ink-strong";
-            const filesButton = (
-              <button
-                key="files"
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  inputRef.current?.click();
-                }}
-                className={isDocsMode ? primaryClass : secondaryClass}
-              >
-                <FileText className="h-3.5 w-3.5" strokeWidth={2} />
-                Losse bestanden…
-              </button>
-            );
-            const folderButton = (
-              <button
-                key="folder"
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  folderInputRef.current?.click();
-                }}
-                className={isDocsMode ? secondaryClass : primaryClass}
-              >
-                <FolderOpen className="h-3.5 w-3.5" strokeWidth={2} />
-                {isDocsMode ? "Hele map…" : "Kies dossiermap…"}
-              </button>
-            );
-            // In document-modus staat de bestand-knop voorop; in
-            // dossier-modus de map-knop.
-            return isDocsMode
-              ? [filesButton, folderButton]
-              : [folderButton, filesButton];
-          })()}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              folderInputRef.current?.click();
+            }}
+            className="inline-flex items-center gap-1.5 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-strong transition-colors hover:border-azure/50 hover:bg-azure-pale/40 hover:text-azure-glow"
+          >
+            <FolderOpen className="h-3.5 w-3.5" strokeWidth={2} />
+            Kies dossiermap…
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              inputRef.current?.click();
+            }}
+            className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface/60 px-3 py-1.5 text-[12.5px] font-medium text-ink-soft transition-colors hover:border-line-strong hover:bg-wash hover:text-ink-strong"
+          >
+            <FileText className="h-3.5 w-3.5" strokeWidth={2} />
+            Losse bestanden…
+          </button>
         </div>
       </div>
 

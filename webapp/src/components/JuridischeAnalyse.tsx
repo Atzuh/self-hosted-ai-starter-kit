@@ -49,6 +49,11 @@ interface JuridischeAnalyseProps {
   klant?: string;
   /** Zaaksoort waarop de analyse is gericht ("hypotheek" | "levering"). */
   zaaksoort?: string;
+  /** Kleine kop erboven. De akte-flow levert geen juridische analyse; daar
+   * staan controles op het stuk zelf, en die horen niet zo te heten. */
+  kicker?: string;
+  /** Kop van het blok. */
+  titel?: string;
 }
 
 const ERNST_LABEL: Record<Ernst, string> = {
@@ -222,6 +227,8 @@ export function JuridischeAnalyse({
   bank,
   klant,
   zaaksoort,
+  kicker,
+  titel,
 }: JuridischeAnalyseProps) {
   const counts = useMemo<AnalyseCounts>(() => {
     if (analyse.counts) return analyse.counts;
@@ -246,10 +253,10 @@ export function JuridischeAnalyse({
           </span>
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft">
-              Juridische analyse
+              {kicker ?? "Juridische analyse"}
             </div>
             <h2 className="mt-1 text-[20px] font-semibold leading-tight tracking-[-0.012em] text-ink-strong">
-              Aandachtspunten voor de behandelaar
+              {titel ?? "Aandachtspunten voor de behandelaar"}
             </h2>
             <div className="mt-1.5 font-mono text-[11px] text-ink-soft">
               {[

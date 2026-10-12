@@ -8,6 +8,8 @@ interface AktePreviewProps {
   url: string;
   /** Bestandsnaam, voor de kop. */
   filename?: string;
+  /** Extra klassen voor het iframe, bv. een andere hoogte naast een kolom. */
+  iframeClassName?: string;
 }
 
 /**
@@ -16,7 +18,7 @@ interface AktePreviewProps {
  * controleren/invullen velden geel gearceerd zijn. Weergave in een iframe zodat
  * de akte-styling geïsoleerd blijft van de app.
  */
-export function AktePreview({ url, filename }: AktePreviewProps) {
+export function AktePreview({ url, filename, iframeClassName }: AktePreviewProps) {
   const [open, setOpen] = useState(true);
 
   return (
@@ -52,7 +54,8 @@ export function AktePreview({ url, filename }: AktePreviewProps) {
             title="Akte-voorbeeld"
             className={cn(
               "h-[720px] w-full rounded-md border border-line bg-white",
-              "shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]"
+              "shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]",
+              iframeClassName
             )}
           />
         </div>

@@ -29,9 +29,9 @@ import type { Aktesoort, Verschot } from "@/components/AkteblokBeheer";
  * andere terugdraaien, want beide sturen het hele object mee.
  */
 
-const LIJST_URL = "http://localhost:5678/webhook/akteblokken";
-const OPSLAAN_URL = "http://localhost:5678/webhook/akteblok";
-const KANTOOR_URL = "http://localhost:5678/webhook/kantoor";
+const LIJST_URL = "/webhook/akteblokken";
+const OPSLAAN_URL = "/webhook/akteblok";
+const KANTOOR_URL = "/webhook/kantoor";
 
 interface Concept {
   soort: string;

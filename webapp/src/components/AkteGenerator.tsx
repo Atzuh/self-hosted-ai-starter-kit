@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowLeft,
   ArrowRight,
   Check,
   Download,
@@ -79,8 +78,8 @@ const ZAAKSOORT_OPTIES: {
 
 /** Akte en analyse zijn losse n8n-workflows met elk een eigen webhook. */
 const DEFAULT_WEBHOOKS: Record<GenerationMode, string> = {
-  akte: "http://localhost:5678/webhook/hypotheekakte",
-  analyse: "http://localhost:5678/webhook/juridische-analyse",
+  akte: "/webhook/hypotheekakte",
+  analyse: "/webhook/juridische-analyse",
 };
 
 /**
@@ -107,7 +106,6 @@ const MODE_META: Record<
     label: string;
     shortLabel: string;
     description: string;
-    badge: string;
     buttonLabel: string;
     title: string;
     subtitle: string;
@@ -118,7 +116,6 @@ const MODE_META: Record<
     shortLabel: "Akte",
     description:
       "Genereer alleen de hypotheekakte-DOCX. Geen juridische analyse.",
-    badge: "Hypotheekakte",
     buttonLabel: "Akte genereren",
     title: "Nieuwe hypotheekakte",
     subtitle:
@@ -129,7 +126,6 @@ const MODE_META: Record<
     shortLabel: "Analyse",
     description:
       "Genereer alleen een juridische analyse van de aangeleverde stukken. Geen akte.",
-    badge: "Juridische analyse",
     buttonLabel: "Analyse genereren",
     title: "Nieuwe juridische analyse",
     subtitle:
@@ -150,6 +146,9 @@ interface GenerationResult {
   zaaksoort?: string;
   /** Deterministisch oordeel over de beschikkingsbevoegdheid (alleen akte-flow). */
   bevoegdheid?: BeschikkingsbevoegdheidData;
+  /** Controles op de aangeleverde stukken (alleen akte-flow). Geen juridische
+   * analyse: die heeft een eigen flow en een eigen scherm. */
+  controle?: JuridischeAnalyseData;
 }
 
 /** Zelfde vorm als de juridische analyse, plus een expliciete status. */
@@ -158,13 +157,13 @@ interface BeschikkingsbevoegdheidData extends JuridischeAnalyseData {
 }
 
 interface AkteGeneratorProps {
-  /** Vaste modus, gekozen op de hub. */
+  /** Vaste modus, gekozen in de keuzelijst. */
   mode: GenerationMode;
-  /** Terug naar de card-keuze. */
-  onBack: () => void;
+  /** Keuzelijst voor de documentsoort, bovenaan het scherm. */
+  kiezer: React.ReactNode;
 }
 
-export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
+export function AkteGenerator({ mode, kiezer }: AkteGeneratorProps) {
   /** Alle PDF's van het dossier voor akte / akte+analyse (map-upload).
    * Sessie-scoped bewaard, zodat een refresh de upload niet wist. */
   const [akteDossierFiles, setAkteDossierFiles] = usePersistedFiles("akte");
@@ -207,6 +206,16 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showStatus, setShowStatus] = useState(false);
   const [result, setResult] = useState<GenerationResult | null>(null);
+  /**
+   * Alleen akte-flow: na de akte ook de juridische analyse draaien op dezelfde
+   * stukken. Bewust niet onthouden en standaard uit: de analyse kost minuten
+   * extra, dus de gebruiker moet er per akte zelf voor kiezen.
+   */
+  const [ookAnalyse, setOokAnalyse] = useState(false);
+  /** Voortgang van die extra analyse; null = niet gevraagd in deze run. */
+  const [analyseState, setAnalyseState] = useState<ProgressState | null>(null);
+  const [analysePhase, setAnalysePhase] = useState(0);
+  const [analyseFout, setAnalyseFout] = useState<string | null>(null);
   const phaseTimersRef = useRef<number[]>([]);
 
   const [recent, setRecent] = useState<RecentAkte[]>([]);
@@ -274,8 +283,9 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
   // Fase-labels: de drie echte pijplijn-stappen. De overgang komt bij beide
   // flows uit de job-status van de workflow, dus wat hier staat is wat er
   // werkelijk draait.
+  const ANALYSE_FASEN = ["Documenten omzetten", "Juridische analyse", "Rapport opmaken"];
   const progressPhases = isAnalyseOnly
-    ? ["Documenten omzetten", "Juridische analyse", "Rapport opmaken"]
+    ? ANALYSE_FASEN
     : ["Documenten omzetten", "Gegevens extraheren", "Akte opmaken & controleren"];
 
   function clearPhaseTimers() {
@@ -302,6 +312,64 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
     setErrorMessage(null);
     setPhaseIndex(0);
     setCurrentStep(1);
+    setAnalyseState(null);
+    setAnalyseFout(null);
+  }
+
+  /**
+   * De juridische analyse ná de akte, op dezelfde bestanden. Het is de gewone
+   * analyse-workflow via zijn eigen webhook: de twee flows blijven in n8n los
+   * van elkaar. Bewust na elkaar en niet tegelijk — beide leunen op hetzelfde
+   * lokale model, en dat trekt geen twee runs tegelijk.
+   *
+   * Een fout hier laat de akte staan: die is al klaar en bruikbaar.
+   */
+  async function draaiAnalyseErbij(uploadFiles: File[]) {
+    setAnalyseState("running");
+    setAnalysePhase(0);
+    setAnalyseFout(null);
+    try {
+      const formData = new FormData();
+      uploadFiles.forEach((file, idx) => {
+        formData.append(`document_${idx}`, file, file.name);
+      });
+      // Bij een hypotheekakte hoort de zaaksoort hypotheek.
+      formData.append("zaaksoort", "hypotheek");
+
+      const response = await fetch(webhookUrls.analyse.trim(), {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      let payload: unknown = await response.json();
+      const jobId = jobIdVanAntwoord(payload);
+      if (jobId) {
+        payload = await wachtOpJob<Record<string, unknown>>(jobId, {
+          onStatus: (job) => {
+            const index = job.status ? STATUS_FASE[job.status] : undefined;
+            if (index !== undefined) setAnalysePhase(index);
+          },
+        });
+      }
+      const data = payload as {
+        analysis?: JuridischeAnalyseData | null;
+        zaaksoort?: string;
+      };
+      if (!data.analysis) throw new Error("De analyse gaf geen resultaat terug.");
+      const analyse = data.analysis;
+      setResult((vorige) =>
+        vorige ? { ...vorige, analyse, zaaksoort: data.zaaksoort ?? "hypotheek" } : vorige
+      );
+      setAnalysePhase(ANALYSE_FASEN.length - 1);
+      setAnalyseState("done");
+      // Het analyserapport staat nu ook in shared/output.
+      loadRecent();
+    } catch (err) {
+      setAnalyseFout(err instanceof Error ? err.message : String(err));
+      setAnalyseState("error");
+    }
   }
 
   async function startGeneration() {
@@ -319,6 +387,11 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
     setPhaseIndex(0);
     setStatusState("running");
     setCurrentStep(2);
+    setAnalyseState(null);
+    setAnalyseFout(null);
+    // Vastleggen bij de start: het vinkje tijdens het genereren omzetten mag de
+    // lopende run niet veranderen.
+    const metAnalyse = !isAnalyseOnly && ookAnalyse;
 
     const sourceFiles = selectedFiles;
     const uploadFiles = dedupeFilesForUpload(sourceFiles);
@@ -374,6 +447,7 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
       // wijkt dat af van de keuze hier, dan wint het antwoord.
       let gebruikteZaaksoort: string = zaaksoortSleutel(zaaksoorten);
       let bevoegdheid: BeschikkingsbevoegdheidData | undefined;
+      let controle: JuridischeAnalyseData | undefined;
 
       if (contentType.includes("application/json")) {
         let payload: unknown = await response.json();
@@ -404,6 +478,7 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
           analysis?: JuridischeAnalyseData | null;
           zaaksoort?: string;
           beschikkingsbevoegdheid?: BeschikkingsbevoegdheidData | null;
+          controle?: JuridischeAnalyseData | null;
         };
         if (data.filename) filename = data.filename;
 
@@ -411,7 +486,7 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
           downloadUrl = data.download_url;
         } else if (data.file_path) {
           downloadUrl =
-            "http://localhost:8080/" +
+            "/" +
             data.file_path.replace("/data/shared/", "");
         }
         if (data.preview_url) previewUrl = data.preview_url;
@@ -422,6 +497,7 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
         analyse = data.analysis ?? undefined;
         gebruikteZaaksoort = data.zaaksoort ?? gebruikteZaaksoort;
         bevoegdheid = data.beschikkingsbevoegdheid ?? undefined;
+        controle = data.controle ?? undefined;
       } else if (!isAnalyseOnly) {
         // Fallback: blob (alleen akte-flow zonder JSON response).
         const blob = await response.blob();
@@ -431,7 +507,8 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
 
       setPhaseIndex(progressPhases.length - 1);
       setStatusState("done");
-      setCurrentStep(3);
+      // Met een analyse erachteraan is de run pas daarna klaar.
+      if (!metAnalyse) setCurrentStep(3);
       setResult({
         mode,
         downloadUrl,
@@ -443,9 +520,15 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
         analyse,
         zaaksoort: isAnalyseOnly ? gebruikteZaaksoort : undefined,
         bevoegdheid,
+        controle,
       });
       // Nieuw gegenereerd bestand staat nu in shared/output — lijst verversen.
       loadRecent();
+
+      if (metAnalyse) {
+        await draaiAnalyseErbij(uploadFiles);
+        setCurrentStep(3);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       clearPhaseTimers();
@@ -456,34 +539,21 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
     }
   }
 
+  /** Akte-flow met de analyse erbij: die komt in de kolom naast het voorbeeld. */
+  const analyseBijAkte = !isAnalyseOnly && result?.analyse ? result.analyse : null;
+  const heeftAandachtspunten = Boolean(
+    result?.bevoegdheid ||
+      (result?.controle && result.controle.aandachtspunten.length > 0) ||
+      analyseBijAkte
+  );
+
   return (
     <div className="mx-auto w-full max-w-[1400px] px-4 pb-16 pt-8 sm:px-8 sm:pt-12">
-      {/* Terug naar de card-keuze */}
-      <button
-        type="button"
-        onClick={onBack}
-        className="mb-6 inline-flex items-center gap-1.5 text-[12.5px] font-medium text-ink-soft transition-colors hover:text-ink-strong"
-      >
-        <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2} />
-        Andere documentsoort
-      </button>
+      {kiezer}
 
       {/* Hero */}
       <section className="mb-10 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
         <div className="animate-fade-up">
-          <div className="mb-5 flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 rounded-sm border border-line-strong bg-surface/80 px-2 py-1 text-[10.5px] font-medium uppercase tracking-[0.14em] text-ink-soft">
-              <span className="h-1 w-1 rounded-full bg-seal" />
-              {modeMeta.badge}
-            </span>
-            <span className="font-mono text-[11px] text-ink-mute">
-              {new Date().toLocaleDateString("nl-NL", {
-                day: "2-digit",
-                month: "long",
-                year: "numeric",
-              })}
-            </span>
-          </div>
           <h1 className="font-display text-[44px] font-medium leading-[1.02] text-ink-strong sm:text-[64px]">
             {modeMeta.title}
           </h1>
@@ -523,7 +593,7 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
             label="Bron-documenten"
             description={
               isAnalyseOnly
-                ? "Voeg losse stukken toe (bijv. alleen een BRP-inzage) of sleep een map hierheen. Bij een map vink je per submap aan wat meegaat."
+                ? "Sleep de dossiermap hierheen of voeg losse stukken toe (bijv. alleen een BRP-inzage). Bij een map vink je per submap aan wat meegaat."
                 : "Sleep de dossiermap hierheen of voeg losse bestanden toe. Per submap vink je aan wat meegaat — hoe minder mee hoeft, hoe sneller de verwerking. Passeeropdracht en kadaster worden automatisch herkend."
             }
             right={
@@ -557,7 +627,6 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
                 onChange={handleAnalyseFilesChange}
                 excludedGroups={analyseExcluded}
                 onExcludedGroupsChange={setAnalyseExcluded}
-                variant="documenten"
               />
             )}
           </Panel>
@@ -618,12 +687,56 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
             </Panel>
           )}
 
+          {/* Analyse erbij — alleen bij de akte, en alleen als de gebruiker het aanvinkt */}
+          {!isAnalyseOnly && (
+            <Panel
+              kicker="03"
+              label="Juridische analyse"
+              description="Standaard maakt Scriptor alleen de akte. Wil je de stukken ook juridisch laten nalezen, vink dat dan hier aan."
+            >
+              <button
+                type="button"
+                onClick={() => setOokAnalyse((aan) => !aan)}
+                role="checkbox"
+                aria-checked={ookAnalyse}
+                disabled={isGenerating}
+                className={cn(
+                  "w-full rounded-md border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                  ookAnalyse
+                    ? "border-ink-strong bg-wash/60"
+                    : "border-line bg-surface hover:bg-wash/30"
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      "flex h-4 w-4 items-center justify-center rounded-[3px] border",
+                      ookAnalyse
+                        ? "border-ink-strong bg-ink-strong text-paper"
+                        : "border-line bg-paper"
+                    )}
+                  >
+                    {ookAnalyse && <Check className="h-3 w-3" strokeWidth={3} />}
+                  </span>
+                  <span className="text-[14px] font-semibold text-ink-strong">
+                    Ook een juridische analyse uitvoeren
+                  </span>
+                </div>
+                <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
+                  Na de akte lezen de vier specialisten dezelfde stukken na. De
+                  akte is eerst klaar; de analyse volgt daarna en kost een paar
+                  minuten extra.
+                </p>
+              </button>
+            </Panel>
+          )}
+
           {/* CTA — kalm paneel, zelfde surface als de andere kaarten */}
           <div className="relative overflow-hidden rounded-lg cta-panel shadow-card">
             <div className="relative p-6 sm:p-7">
               <div className="mb-3 flex items-center gap-3">
                 <span className="font-mono text-[11px] font-medium text-ink-mute">
-                  {isAnalyseOnly ? "04" : "03"}
+                  04
                 </span>
                 <span className="h-px w-10 bg-line" />
                 <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft">
@@ -662,7 +775,13 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
                     )}
                     <SummaryChip
                       label="Output"
-                      value={mode === "analyse" ? "Analyse" : "Akte (.docx)"}
+                      value={
+                        mode === "analyse"
+                          ? "Analyse"
+                          : ookAnalyse
+                            ? "Akte (.docx) + analyse"
+                            : "Akte (.docx)"
+                      }
                     />
                   </div>
 
@@ -738,6 +857,20 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
             />
           )}
 
+          {/* Voortgang van de analyse die na de akte draait */}
+          {analyseState && (
+            <GenerationProgress
+              phases={ANALYSE_FASEN}
+              phase={analysePhase}
+              state={analyseState}
+              errorMessage={
+                analyseFout
+                  ? `De akte is wel gemaakt; de juridische analyse is mislukt. ${analyseFout}`
+                  : null
+              }
+            />
+          )}
+
           {/* Resultaat — akte */}
           {result?.downloadUrl && result.filename && (
             <div className="overflow-hidden rounded-lg border border-success/30 bg-success-pale shadow-card animate-fade-up">
@@ -769,11 +902,6 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
                 </div>
               </div>
             </div>
-          )}
-
-          {/* Inline voorbeeld van de gegenereerde akte (met arceringen) */}
-          {result?.previewUrl && (
-            <AktePreview url={result.previewUrl} filename={result.filename} />
           )}
 
           {/* Resultaat — analyse-only */}
@@ -811,43 +939,9 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
             </div>
           )}
 
-          {/* Beschikkingsbevoegdheid — hoort bij de akte, niet bij de analyse */}
-          {result?.bevoegdheid && (
-            <div className="space-y-3">
-              <div
-                className={
-                  "flex items-start gap-3 rounded-lg border p-4 " +
-                  (result.bevoegdheid.status === "rond"
-                    ? "border-azure/30 bg-azure-pale"
-                    : "border-amber-400/50 bg-amber-50")
-                }
-              >
-                <Scale
-                  className="mt-0.5 h-5 w-5 flex-shrink-0 text-ink-strong"
-                  strokeWidth={2}
-                />
-                <div>
-                  <div className="text-[15px] font-semibold leading-tight text-ink-strong">
-                    Beschikkingsbevoegdheid
-                  </div>
-                  <div className="mt-1 text-[13px] leading-snug text-ink">
-                    {result.bevoegdheid.samenvatting}
-                  </div>
-                </div>
-              </div>
-              {result.bevoegdheid.aandachtspunten.length > 0 && (
-                <JuridischeAnalyse
-                  analyse={result.bevoegdheid}
-                  zaaknummer={result.zaaknummer}
-                  bank={result.bankDisplayName}
-                  klant={result.klantSamenvatting}
-                />
-              )}
-            </div>
-          )}
-
-          {/* Juridische analyse-blok */}
-          {result?.analyse && (
+          {/* Juridische analyse-blok (analyse-flow; bij de akte staat hij naast
+              het voorbeeld, zie onderaan) */}
+          {isAnalyseOnly && result?.analyse && (
             <JuridischeAnalyse
               analyse={result.analyse}
               zaaknummer={result.zaaknummer}
@@ -874,6 +968,97 @@ export function AkteGenerator({ mode, onBack }: AkteGeneratorProps) {
           />
         </div>
       </div>
+
+      {/* Resultaat van de akte: aandachtspunten en voorbeeld naast elkaar, over
+          de volle breedte zodat beide leesbaar blijven. Het voorbeeld blijft
+          staan terwijl je door de aandachtspunten scrolt. */}
+      {result && (result.previewUrl || heeftAandachtspunten) && (
+        <div
+          className={cn(
+            "mt-6 grid grid-cols-1 gap-6",
+            result.previewUrl &&
+              heeftAandachtspunten &&
+              "xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] xl:items-start"
+          )}
+        >
+          {heeftAandachtspunten && (
+            <div className="space-y-6">
+            {/* Beschikkingsbevoegdheid — hoort bij de akte, niet bij de analyse */}
+            {result?.bevoegdheid && (
+              <div className="space-y-3">
+                <div
+                  className={
+                    "flex items-start gap-3 rounded-lg border p-4 " +
+                    (result.bevoegdheid.status === "rond"
+                      ? "border-azure/30 bg-azure-pale"
+                      : "border-amber-400/50 bg-amber-50")
+                  }
+                >
+                  <Scale
+                    className="mt-0.5 h-5 w-5 flex-shrink-0 text-ink-strong"
+                    strokeWidth={2}
+                  />
+                  <div>
+                    <div className="text-[15px] font-semibold leading-tight text-ink-strong">
+                      Beschikkingsbevoegdheid
+                    </div>
+                    <div className="mt-1 text-[13px] leading-snug text-ink">
+                      {result.bevoegdheid.samenvatting}
+                    </div>
+                  </div>
+                </div>
+                {result.bevoegdheid.aandachtspunten.length > 0 && (
+                  <JuridischeAnalyse
+                    analyse={result.bevoegdheid}
+                    zaaknummer={result.zaaknummer}
+                    bank={result.bankDisplayName}
+                    klant={result.klantSamenvatting}
+                    kicker="Beschikkingsbevoegdheid"
+                    titel="Aandachtspunten bij de bevoegdheid"
+                  />
+                )}
+              </div>
+            )}
+
+            {/* Controles op de aangeleverde stukken. Geen juridische analyse:
+                die is een eigen flow met eigen specialisten. */}
+            {result?.controle && result.controle.aandachtspunten.length > 0 && (
+              <JuridischeAnalyse
+                analyse={result.controle}
+                zaaknummer={result.zaaknummer}
+                bank={result.bankDisplayName}
+                klant={result.klantSamenvatting}
+                kicker="Controle op de stukken"
+                titel="Wat niet klopt in de aangeleverde stukken"
+              />
+            )}
+              {analyseBijAkte && (
+                <JuridischeAnalyse
+                  analyse={analyseBijAkte}
+                  zaaknummer={result.zaaknummer}
+                  bank={result.bankDisplayName}
+                  klant={result.klantSamenvatting}
+                  zaaksoort={result.zaaksoort}
+                />
+              )}
+            </div>
+          )}
+
+          {/* Inline voorbeeld van de gegenereerde akte (met arceringen). Op
+              smalle schermen bovenaan, zoals voorheen. */}
+          {result.previewUrl && (
+            <div className="order-first xl:sticky xl:top-[4.5rem] xl:order-none">
+              <AktePreview
+                url={result.previewUrl}
+                filename={result.filename}
+                iframeClassName={
+                  heeftAandachtspunten ? "xl:h-[calc(100vh-11rem)]" : undefined
+                }
+              />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,0 +1,320 @@
+{
+  "name": "Dashboard",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "dashboard",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "dash-hook-0",
+      "name": "Webhook GET dashboard",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -260,
+        0
+      ],
+      "webhookId": "dash-dashboard"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst MAP = '/data/shared/dashboard';\nconst NOTAMAIL_PATH = MAP + '/notamail.json';\nconst VRAGEN_PATH = MAP + '/vragen.json';\nconst PDF_NAAM = 'notamail.pdf';\n\n// Alleen een ontbrekend bestand telt als 'nog niets geplaatst'. Elke andere\n// leesfout (EIO als macOS het bestand naar iCloud heeft weggeschreven) gooien we\n// door: anders zou de volgende opslag de bestaande inhoud met een lege lijst\n// overschrijven.\nfunction lees(pad, standaard) {\n  try { return JSON.parse(fs.readFileSync(pad, 'utf8')); } catch (err) {\n    if (err.code === 'ENOENT') return standaard;\n    throw new Error('Kon ' + pad.split('/').pop() + ' niet lezen: ' + err.message);\n  }\n}\n\n// Eerst naar een tijdelijk bestand en dan hernoemen: een afgebroken schrijfactie\n// laat zo nooit een half JSON-bestand achter.\nfunction schrijfRuw(pad, data) {\n  fs.mkdirSync(MAP, { recursive: true });\n  const tmp = pad + '.' + Date.now() + '.tmp';\n  fs.writeFileSync(tmp, data);\n  fs.renameSync(tmp, pad);\n}\n\nfunction schrijf(pad, inhoud) {\n  schrijfRuw(pad, JSON.stringify(inhoud, null, 2) + '\\n');\n}\n\nfunction tekst(waarde, max) {\n  return String(waarde == null ? '' : waarde).replace(/\\r\\n/g, '\\n').trim().slice(0, max);\n}\n\n// Het veld 'data' bevat de invoer als JSON-string (form-urlencoded, zo\n// vermijden we een CORS-preflight).\nfunction invoer() {\n  const body = $json.body || {};\n  if (typeof body.data === 'string') return JSON.parse(body.data);\n  if (body.data && typeof body.data === 'object') return body.data;\n  return body;\n}\n\n// Verwachte fouten als {success:false} teruggeven: een throw levert bij\n// responseMode=responseNode een leeg 200-antwoord op.\ntry {\n  const vragen = lees(VRAGEN_PATH, { vragen: [] }).vragen;\n  return [{ json: {\n    success: true,\n    notamail: lees(NOTAMAIL_PATH, null),\n    vragen: Array.isArray(vragen) ? vragen : [],\n  } }];\n} catch (err) {\n  return [{ json: { success: false, error: err.message } }];\n}"
+      },
+      "id": "dash-code-0",
+      "name": "Read Dashboard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "dash-resp-0",
+      "name": "Respond GET dashboard",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dashboard-notamail",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "dash-hook-220",
+      "name": "Webhook POST notamail",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -260,
+        220
+      ],
+      "webhookId": "dash-dashboard-notamail"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst MAP = '/data/shared/dashboard';\nconst NOTAMAIL_PATH = MAP + '/notamail.json';\nconst VRAGEN_PATH = MAP + '/vragen.json';\nconst PDF_NAAM = 'notamail.pdf';\n\n// Alleen een ontbrekend bestand telt als 'nog niets geplaatst'. Elke andere\n// leesfout (EIO als macOS het bestand naar iCloud heeft weggeschreven) gooien we\n// door: anders zou de volgende opslag de bestaande inhoud met een lege lijst\n// overschrijven.\nfunction lees(pad, standaard) {\n  try { return JSON.parse(fs.readFileSync(pad, 'utf8')); } catch (err) {\n    if (err.code === 'ENOENT') return standaard;\n    throw new Error('Kon ' + pad.split('/').pop() + ' niet lezen: ' + err.message);\n  }\n}\n\n// Eerst naar een tijdelijk bestand en dan hernoemen: een afgebroken schrijfactie\n// laat zo nooit een half JSON-bestand achter.\nfunction schrijfRuw(pad, data) {\n  fs.mkdirSync(MAP, { recursive: true });\n  const tmp = pad + '.' + Date.now() + '.tmp';\n  fs.writeFileSync(tmp, data);\n  fs.renameSync(tmp, pad);\n}\n\nfunction schrijf(pad, inhoud) {\n  schrijfRuw(pad, JSON.stringify(inhoud, null, 2) + '\\n');\n}\n\nfunction tekst(waarde, max) {\n  return String(waarde == null ? '' : waarde).replace(/\\r\\n/g, '\\n').trim().slice(0, max);\n}\n\n// Het veld 'data' bevat de invoer als JSON-string (form-urlencoded, zo\n// vermijden we een CORS-preflight).\nfunction invoer() {\n  const body = $json.body || {};\n  if (typeof body.data === 'string') return JSON.parse(body.data);\n  if (body.data && typeof body.data === 'object') return body.data;\n  return body;\n}\n\n// Verwachte fouten als {success:false} teruggeven: een throw levert bij\n// responseMode=responseNode een leeg 200-antwoord op.\nlet inv;\ntry { inv = invoer(); } catch (err) {\n  return [{ json: { success: false, error: 'Ongeldige invoer: ' + err.message } }];\n}\n\nconst inhoud = tekst(inv.tekst, 200000);\nconst datum = String(inv.datum || '');\nif (!inhoud) return [{ json: { success: false, error: 'De Notamail is leeg.' } }];\n// De datum komt van de browser: de container draait in UTC en zou rond\n// middernacht de verkeerde dag kiezen.\nif (!/^\\d{4}-\\d{2}-\\d{2}$/.test(datum)) {\n  return [{ json: { success: false, error: 'Ongeldige datum.' } }];\n}\n\nconst notamail = {\n  datum,\n  tekst: inhoud,\n  pdf: null,\n  geplaatst_door: tekst(inv.auteur, 60),\n  geplaatst_op: new Date().toISOString(),\n};\ntry {\n  schrijf(NOTAMAIL_PATH, notamail);\n  // Geplakte tekst vervangt een eerder geuploade pdf.\n  try { fs.unlinkSync(MAP + '/' + PDF_NAAM); } catch (_) {}\n} catch (err) {\n  return [{ json: { success: false, error: 'Kon de Notamail niet opslaan: ' + err.message } }];\n}\nreturn [{ json: { success: true, notamail } }];"
+      },
+      "id": "dash-code-220",
+      "name": "Save Notamail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "dash-resp-220",
+      "name": "Respond POST notamail",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        180,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dashboard-vraag",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "dash-hook-440",
+      "name": "Webhook POST vraag",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -260,
+        440
+      ],
+      "webhookId": "dash-dashboard-vraag"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst MAP = '/data/shared/dashboard';\nconst NOTAMAIL_PATH = MAP + '/notamail.json';\nconst VRAGEN_PATH = MAP + '/vragen.json';\nconst PDF_NAAM = 'notamail.pdf';\n\n// Alleen een ontbrekend bestand telt als 'nog niets geplaatst'. Elke andere\n// leesfout (EIO als macOS het bestand naar iCloud heeft weggeschreven) gooien we\n// door: anders zou de volgende opslag de bestaande inhoud met een lege lijst\n// overschrijven.\nfunction lees(pad, standaard) {\n  try { return JSON.parse(fs.readFileSync(pad, 'utf8')); } catch (err) {\n    if (err.code === 'ENOENT') return standaard;\n    throw new Error('Kon ' + pad.split('/').pop() + ' niet lezen: ' + err.message);\n  }\n}\n\n// Eerst naar een tijdelijk bestand en dan hernoemen: een afgebroken schrijfactie\n// laat zo nooit een half JSON-bestand achter.\nfunction schrijfRuw(pad, data) {\n  fs.mkdirSync(MAP, { recursive: true });\n  const tmp = pad + '.' + Date.now() + '.tmp';\n  fs.writeFileSync(tmp, data);\n  fs.renameSync(tmp, pad);\n}\n\nfunction schrijf(pad, inhoud) {\n  schrijfRuw(pad, JSON.stringify(inhoud, null, 2) + '\\n');\n}\n\nfunction tekst(waarde, max) {\n  return String(waarde == null ? '' : waarde).replace(/\\r\\n/g, '\\n').trim().slice(0, max);\n}\n\n// Het veld 'data' bevat de invoer als JSON-string (form-urlencoded, zo\n// vermijden we een CORS-preflight).\nfunction invoer() {\n  const body = $json.body || {};\n  if (typeof body.data === 'string') return JSON.parse(body.data);\n  if (body.data && typeof body.data === 'object') return body.data;\n  return body;\n}\n\nconst MAX_VRAGEN = 200;\n\nlet inv;\ntry { inv = invoer(); } catch (err) {\n  return [{ json: { success: false, error: 'Ongeldige invoer: ' + err.message } }];\n}\n\nfunction fout(melding) { return [{ json: { success: false, error: melding } }]; }\n// crypto is niet beschikbaar in de sandbox; tijd + toeval is hier uniek genoeg.\nfunction nieuwId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }\n\nlet vragen;\ntry { vragen = lees(VRAGEN_PATH, { vragen: [] }).vragen; } catch (err) { return fout(err.message); }\nif (!Array.isArray(vragen)) vragen = [];\n\nconst actie = String(inv.actie || '');\nconst nu = new Date().toISOString();\nconst vraag = vragen.find((v) => v.id === inv.vraag_id);\n\nif (actie === 'nieuw') {\n  const inhoud = tekst(inv.tekst, 4000);\n  const auteur = tekst(inv.auteur, 60);\n  if (!inhoud) return fout('De vraag is leeg.');\n  if (!auteur) return fout('Vul je naam in.');\n  vragen.unshift({ id: nieuwId(), auteur, tekst: inhoud, geplaatst_op: nu, opgelost: false, reacties: [] });\n  vragen = vragen.slice(0, MAX_VRAGEN);\n} else if (actie === 'reactie') {\n  const inhoud = tekst(inv.tekst, 4000);\n  const auteur = tekst(inv.auteur, 60);\n  if (!vraag) return fout('Deze vraag bestaat niet meer.');\n  if (!inhoud) return fout('De reactie is leeg.');\n  if (!auteur) return fout('Vul je naam in.');\n  if (!Array.isArray(vraag.reacties)) vraag.reacties = [];\n  vraag.reacties.push({ id: nieuwId(), auteur, tekst: inhoud, geplaatst_op: nu });\n} else if (actie === 'opgelost') {\n  if (!vraag) return fout('Deze vraag bestaat niet meer.');\n  vraag.opgelost = Boolean(inv.opgelost);\n} else if (actie === 'verwijderen') {\n  if (!vraag) return fout('Deze vraag bestaat niet meer.');\n  vragen = vragen.filter((v) => v.id !== vraag.id);\n} else {\n  return fout('Onbekende actie: ' + actie);\n}\n\ntry { schrijf(VRAGEN_PATH, { vragen }); } catch (err) {\n  return fout('Kon de vragen niet opslaan: ' + err.message);\n}\nreturn [{ json: { success: true, vragen } }];"
+      },
+      "id": "dash-code-440",
+      "name": "Bewerk Vragen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "dash-resp-440",
+      "name": "Respond POST vraag",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        180,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dashboard-notamail-pdf",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "dash-hook-660",
+      "name": "Webhook POST notamail-pdf",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -260,
+        660
+      ],
+      "webhookId": "dash-dashboard-notamail-pdf"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst MAP = '/data/shared/dashboard';\nconst NOTAMAIL_PATH = MAP + '/notamail.json';\nconst VRAGEN_PATH = MAP + '/vragen.json';\nconst PDF_NAAM = 'notamail.pdf';\n\n// Alleen een ontbrekend bestand telt als 'nog niets geplaatst'. Elke andere\n// leesfout (EIO als macOS het bestand naar iCloud heeft weggeschreven) gooien we\n// door: anders zou de volgende opslag de bestaande inhoud met een lege lijst\n// overschrijven.\nfunction lees(pad, standaard) {\n  try { return JSON.parse(fs.readFileSync(pad, 'utf8')); } catch (err) {\n    if (err.code === 'ENOENT') return standaard;\n    throw new Error('Kon ' + pad.split('/').pop() + ' niet lezen: ' + err.message);\n  }\n}\n\n// Eerst naar een tijdelijk bestand en dan hernoemen: een afgebroken schrijfactie\n// laat zo nooit een half JSON-bestand achter.\nfunction schrijfRuw(pad, data) {\n  fs.mkdirSync(MAP, { recursive: true });\n  const tmp = pad + '.' + Date.now() + '.tmp';\n  fs.writeFileSync(tmp, data);\n  fs.renameSync(tmp, pad);\n}\n\nfunction schrijf(pad, inhoud) {\n  schrijfRuw(pad, JSON.stringify(inhoud, null, 2) + '\\n');\n}\n\nfunction tekst(waarde, max) {\n  return String(waarde == null ? '' : waarde).replace(/\\r\\n/g, '\\n').trim().slice(0, max);\n}\n\n// Het veld 'data' bevat de invoer als JSON-string (form-urlencoded, zo\n// vermijden we een CORS-preflight).\nfunction invoer() {\n  const body = $json.body || {};\n  if (typeof body.data === 'string') return JSON.parse(body.data);\n  if (body.data && typeof body.data === 'object') return body.data;\n  return body;\n}\n\nconst MAX_BYTES = 25 * 1024 * 1024;\nfunction fout(melding) { return [{ json: { success: false, error: melding } }]; }\n\n// Multipart: 'datum' en 'auteur' als gewone velden, de pdf als bestand 'file'.\nconst body = $json.body || {};\nconst datum = String(body.datum || '');\n// De datum komt van de browser: de container draait in UTC en zou rond\n// middernacht de verkeerde dag kiezen.\nif (!/^\\d{4}-\\d{2}-\\d{2}$/.test(datum)) return fout('Ongeldige datum.');\n\nconst binaries = $binary || {};\nconst sleutels = Object.keys(binaries);\nconst sleutel = binaries.file ? 'file' : (sleutels.length === 1 ? sleutels[0] : null);\nif (!sleutel) return fout('Geen bestand gevonden in de upload.');\n\n// $binary geeft alleen metadata; de inhoud komt via de helper binnen.\nlet buffer;\ntry {\n  buffer = await this.helpers.getBinaryDataBuffer(0, sleutel);\n} catch (err) {\n  return fout('Kon het geuploade bestand niet lezen: ' + err.message);\n}\nif (!buffer || !buffer.length) return fout('Het geuploade bestand is leeg.');\nif (buffer.length > MAX_BYTES) return fout('Het bestand is groter dan 25 MB.');\n// Op de inhoud controleren, niet op de extensie: de pdf wordt straks door de\n// webapp geserveerd en in de browser getoond.\nif (buffer.subarray(0, 5).toString('latin1') !== '%PDF-') {\n  return fout('Dit is geen pdf-bestand.');\n}\n\nconst notamail = {\n  datum,\n  tekst: '',\n  pdf: PDF_NAAM,\n  bestandsnaam: tekst(binaries[sleutel].fileName || 'notamail.pdf', 200),\n  geplaatst_door: tekst(body.auteur, 60),\n  geplaatst_op: new Date().toISOString(),\n};\ntry {\n  schrijfRuw(MAP + '/' + PDF_NAAM, buffer);\n  schrijf(NOTAMAIL_PATH, notamail);\n} catch (err) {\n  return fout('Kon de Notamail niet opslaan: ' + err.message);\n}\nreturn [{ json: { success: true, notamail } }];"
+      },
+      "id": "dash-code-660",
+      "name": "Save Notamail PDF",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "dash-resp-660",
+      "name": "Respond POST notamail-pdf",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        180,
+        660
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook GET dashboard": {
+      "main": [
+        [
+          {
+            "node": "Read Dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Dashboard": {
+      "main": [
+        [
+          {
+            "node": "Respond GET dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook POST notamail": {
+      "main": [
+        [
+          {
+            "node": "Save Notamail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Notamail": {
+      "main": [
+        [
+          {
+            "node": "Respond POST notamail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook POST vraag": {
+      "main": [
+        [
+          {
+            "node": "Bewerk Vragen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bewerk Vragen": {
+      "main": [
+        [
+          {
+            "node": "Respond POST vraag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook POST notamail-pdf": {
+      "main": [
+        [
+          {
+            "node": "Save Notamail PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Notamail PDF": {
+      "main": [
+        [
+          {
+            "node": "Respond POST notamail-pdf",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b0a4c6f2-6d0e-4a55-9a53-2f0f6f1f7d01",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "dashboard"
+}

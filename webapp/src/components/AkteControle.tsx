@@ -10,7 +10,7 @@ import type { LogEntry, LogKind, StatusState } from "@/components/StatusLog";
 import { AkteControleResultaat } from "@/components/AkteControleResultaat";
 import type { AkteControleData } from "@/components/AkteControleResultaat";
 
-const DEFAULT_WEBHOOK = "http://localhost:5678/webhook/akte-controle";
+const DEFAULT_WEBHOOK = "/webhook/akte-controle";
 
 function formatTime(date: Date) {
   const pad = (n: number) => n.toString().padStart(2, "0");

@@ -57,6 +57,7 @@
       "uploaded_by": "system",
       "model_code": "HYRABO00",
       "model_version": "H1-2018 (01-09-2018)",
+      "opslag_percentage": 35,
       "extraction_prompt": "Je bent een data-extractie assistent voor een notariskantoor.\nGeef ALLEEN geldige JSON terug. Geen markdown, geen extra tekst.\n\nExtraheer uit deze Rabobank passeeropdracht markdown naar JSON met velden:\n- ech_zaaknummer\n- inschrijvingsbedrag_cijfer\n- inschrijvingsbedrag_woorden\n- opslag_cijfer\n- opslag_woorden\n- totaal_hypotheek_cijfer\n- totaal_hypotheek_woorden\n- onderpand_straat\n- onderpand_huisnummer\n- onderpand_postcode\n- onderpand_woonplaats\n- modelakte_code\n- klanten[] met: naam_hoofdletters, voornamen, nationaliteit, geboortedatum (exact zoals in de tekst, formaat DD-MM-JJJJ)\n\nMarkdown:\n{{markdown}}",
       "placeholders": {
         "<<ECH_ZAAKNUMMER>>": [

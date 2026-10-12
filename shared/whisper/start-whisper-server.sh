@@ -61,6 +61,19 @@ echo "  threads: ${THREADS}"
 #   en verdubbelde de hallucinatielussen. De workflow stuurt per verzoek wel een
 #   korte prompt mee met het onderwerp en de deelnemers; dat is het enige dat
 #   aantoonbaar helpt (namen worden dan goed gespeld).
+# --max-context 0: het model krijgt de eerder geschreven tekst niet meer mee als
+#   context voor het volgende stuk. Die context is waar herhalingslussen uit
+#   ontstaan: één keer "Ja." te veel, en het volgende venster gaat erop door.
+#   Gemeten op een levenstestamentbespreking van 35 minuten (7-10-2026): van
+#   3.129 naar 3.833 woorden en van 2 lussen naar 0. Wat terugkwam was precies wat
+#   in het verslag ontbrak — de opsomming over de omvang van de volmacht (daar
+#   stond 9× "Dat is de verkoop van de zorgzaken") en de antwoorden van de
+#   cliënten. Ruimere VAD-instellingen (drempel 0,3 of 0,2, meer padding) voegden
+#   daarbovenop niets toe.
+#   Prijs: de initial prompt uit de workflow doet nu niets meer, want die loopt
+#   via dezelfde context. Met alleen de prompt als context (--carry-initial-prompt,
+#   -mc 40) werd "levenstestament" overal goed gespeld, maar gingen er 400 woorden
+#   verloren. Inhoud gaat voor spelling.
 VAD_ARGS=()
 if [[ -f "$VAD_MODEL" ]]; then
   VAD_ARGS=(--vad --vad-model "$VAD_MODEL")
@@ -76,5 +89,6 @@ exec whisper-server \
   --language "$LANG_CODE" \
   --threads "$THREADS" \
   --beam-size 5 \
+  --max-context 0 \
   --no-timestamps \
   --print-progress \

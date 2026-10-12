@@ -1,0 +1,513 @@
+{
+  "name": "Dossiers",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "koopovereenkomst",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "cefa2a98-ca14-5ae0-a012-cc430f49ffdf",
+      "name": "Webhook Koopovereenkomst",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        200
+      ],
+      "webhookId": "dossiers-koopovereenkomst"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Maakt het jobbestand aan waar de rest van de workflow zijn voortgang in\n// bijhoudt, en laat de binaries ongemoeid doorlopen naar Lees Upload.\nconst item = $input.first();\n\nconst fs = require('fs');\nconst JOB_DIR = '/data/shared/jobs';\nconst nu = new Date();\nconst stempel =\n  nu.getFullYear() +\n  String(nu.getMonth() + 1).padStart(2, '0') +\n  String(nu.getDate()).padStart(2, '0') +\n  '_' +\n  String(nu.getHours()).padStart(2, '0') +\n  String(nu.getMinutes()).padStart(2, '0') +\n  String(nu.getSeconds()).padStart(2, '0');\n// Het jobId moet op het executienummer eindigen: daaraan vindt de workflow\n// Foutafhandeling het jobbestand terug als deze run onderweg afbreekt.\nconst jobId = `ko_${stempel}_${String($execution.id || Math.random().toString(36).slice(2))}`\n  .replace(/[^0-9A-Za-z_-]/g, '_');\n\nfs.mkdirSync(JOB_DIR, { recursive: true });\n\n// Oude jobbestanden opruimen; ze bevatten dossierinhoud en horen niet langer te\n// blijven staan dan nodig is om het resultaat op te halen.\nconst BEWAARTERMIJN_MS = 24 * 60 * 60 * 1000;\ntry {\n  for (const naam of fs.readdirSync(JOB_DIR)) {\n    if (!naam.endsWith('.json')) continue;\n    const pad = `${JOB_DIR}/${naam}`;\n    if (Date.now() - fs.statSync(pad).mtimeMs > BEWAARTERMIJN_MS) fs.unlinkSync(pad);\n  }\n} catch (_) {\n  // Best-effort: een nieuw dossier mag hier niet op stuklopen.\n}\n\nfs.writeFileSync(\n  `${JOB_DIR}/${jobId}.json`,\n  JSON.stringify({\n    job_id: jobId,\n    soort: 'koopovereenkomst',\n    status: 'document omzetten',\n    fase: 1,\n    resultaat: null,\n    fout: null,\n    gestart_op: nu.toISOString(),\n    bijgewerkt_op: nu.toISOString(),\n  }),\n  'utf8'\n);\n\nreturn [{ json: { ...(item.json || {}), jobId, stempel }, binary: item.binary }];\n"
+      },
+      "id": "0d01311c-6632-5d40-8682-dd0fb52035ce",
+      "name": "Create Job",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"success\": true, \"job_id\": $json.jobId, \"status\": \"document omzetten\" } }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "e348c1eb-7dce-54ee-b623-e5e0c02a841b",
+      "name": "Respond Job Id",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Leest de multipart-upload en bouwt per document een Docling-item (base64).\n// Meestal is dat één pdf; een losse lijst van zaken of een allonge mag erbij.\nconst item = $input.first();\nconst b = item.binary || {};\nconst body = (item.json && item.json.body) || {};\n\nfunction isDocument(k) {\n  const fn = String(b[k]?.fileName || '').toLowerCase();\n  const mime = String(b[k]?.mimeType || '').toLowerCase();\n  return fn.endsWith('.pdf') || fn.endsWith('.docx') || mime.includes('pdf') || mime.includes('wordprocessingml');\n}\n\nconst sleutels = Object.keys(b).filter(isDocument).slice(0, 5);\nif (sleutels.length === 0) {\n  throw new Error('Geen koopovereenkomst ontvangen. Upload een pdf- of Word-bestand.');\n}\n\nconst uit = [];\nfor (const k of sleutels) {\n  const buffer = await this.helpers.getBinaryDataBuffer(0, k);\n  uit.push({\n    json: {\n      filename: b[k]?.fileName || `${k}.pdf`,\n      base64_string: buffer.toString('base64'),\n      dossiernummer: String(body.dossiernummer || '').trim().slice(0, 40),\n      auteur: String(body.auteur || '').trim().slice(0, 80),\n    },\n  });\n}\nreturn uit;\n"
+      },
+      "id": "2cc75cd3-4374-54be-a871-935f151b92f6",
+      "name": "Lees Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://docling:5001/v1/convert/source",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"sources\": [\n    {\n      \"kind\": \"file\",\n      \"filename\": {{ JSON.stringify($json.filename) }},\n      \"base64_string\": {{ JSON.stringify($json.base64_string) }}\n    }\n  ],\n  \"options\": {\n    \"to_formats\": [\"md\"],\n    \"do_ocr\": true\n  }\n}",
+        "options": {
+          "timeout": 600000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "id": "77768ec3-e9f0-533a-89f8-a65e30d01a29",
+      "name": "Docling Convert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 8000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Per Docling-response: pak de markdown en bewaar de bestandsnaam.\nconst bron = $('Lees Upload').itemMatching($itemIndex);\nconst filename = bron?.json?.filename || '';\n\nconst payload = $json;\nlet md = '';\nif (payload?.document?.md_content) md = payload.document.md_content;\nelse if (payload?.md_content) md = payload.md_content;\nelse if (payload?.result?.document?.md_content) md = payload.result.document.md_content;\nelse if (Array.isArray(payload?.documents) && payload.documents[0]?.md_content) md = payload.documents[0].md_content;\n\nif (!md) {\n  throw new Error(`Docling gaf geen tekst terug voor ${filename || 'het document'}. Is het een leesbare pdf?`);\n}\n\n// Docling sluit afbeeldingen (logo's, parafen, handtekeningen) als base64 in de\n// markdown in. Die vullen het contextvenster van het model en moeten eruit\n// voordat er iets wordt afgekapt of geselecteerd.\nmd = String(md)\n  .replace(/!\\[[^\\]]*\\]\\(\\s*data:[^)]*\\)/gi, '')\n  .replace(/<img[^>]*src=[\"']?data:[^>]*>/gi, '')\n  .replace(/data:image\\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '')\n  .replace(/\\n{3,}/g, '\\n\\n')\n  .trim();\n\nreturn { json: { filename, markdown: md } };\n"
+      },
+      "id": "e2054c7f-b84a-5e79-89b6-c5b363aeb3fc",
+      "name": "Extract Markdown",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst JOB_PAD = `/data/shared/jobs/${$('Create Job').first().json.jobId}.json`;\n\nfunction werkJobBij(velden) {\n  let job = {};\n  try {\n    job = JSON.parse(fs.readFileSync(JOB_PAD, 'utf8'));\n  } catch (_) {\n    // Jobbestand weg (opgeruimd?): dan schrijven we het opnieuw aan.\n  }\n  const nieuw = { ...job, ...velden, bijgewerkt_op: new Date().toISOString() };\n  fs.writeFileSync(JOB_PAD, JSON.stringify(nieuw), 'utf8');\n  return nieuw;\n}\n\n// Voegt de omgezette documenten samen en bouwt de eerste, smalle vraag aan het\n// model: wie zijn de verkopers en de kopers. De partijen staan in elk\n// koopmodel vooraan, dus alleen het begin van het document gaat mee.\nconst items = $input.all();\nconst markdown = items.map((it) => String(it.json.markdown || '')).join('\\n\\n').trim();\nconst bestanden = items.map((it) => it.json.filename).filter(Boolean);\n\n// Geen koopovereenkomst: eerst de job op 'fout' zetten, pas daarna gooien.\n// Andersom wacht de webapp op een antwoord dat nooit komt.\nconst laag = markdown.toLowerCase();\nif (!/koop/.test(laag) || !/verkoper/.test(laag) || !/koper/.test(laag)) {\n  const melding =\n    'Dit document lijkt geen koopovereenkomst: de woorden koop, verkoper en koper komen er niet ' +\n    'samen in voor. Is het een scan, controleer dan of de tekst leesbaar is.';\n  werkJobBij({ status: 'fout', fase: 4, fout: melding });\n  throw new Error(melding);\n}\n\nwerkJobBij({ status: 'partijen uitlezen', fase: 2 });\n\n// Tot en met de omschrijving van het verkochte; die staat vóór artikel 1.\nconst MAX_KOP = 9000;\nconst artikel1 = markdown.search(/\\bartikel\\s*1\\b/i);\nconst kop = markdown.slice(0, artikel1 > 1500 ? Math.min(artikel1, MAX_KOP) : MAX_KOP);\n\n// Geen ingevulde voorbeelden in de prompt: dit model schrijft die terug als\n// inhoud. Het schema is daarom leeg en de uitleg staat in de regels.\nconst chatInput = `Je leest het begin van een Nederlandse koopovereenkomst voor een onroerende zaak. Haal de verkopers en de kopers eruit.\n\nGeef ALLEEN geldige JSON terug, precies in deze vorm:\n{\"verkopers\":[],\"kopers\":[]}\n\nElke persoon in die lijsten is een object met precies deze velden:\n{\"achternaam\":\"\",\"voornamen\":\"\",\"geboorteplaats\":\"\",\"geboortedatum\":\"\",\"straat_huisnummer\":\"\",\"postcode\":\"\",\"woonplaats\":\"\",\"burgerlijke_staat\":\"\",\"legitimatie\":\"\",\"telefoon\":\"\",\"email\":\"\"}\n\nRegels:\n- Neem gegevens letterlijk over uit het document. Verzin, vertaal of verbeter niets.\n- Staat een gegeven er niet, laat het veld dan leeg.\n- achternaam is inclusief tussenvoegsel. Bij een rechtspersoon komt de volledige naam in achternaam.\n- legitimatie is de soort en het nummer van het identiteitsbewijs.\n- Hooguit 4 verkopers en hooguit 4 kopers.\n- Een makelaar, notaris of adviseur is geen partij.\n\nDOCUMENT:\n${kop}`;\n\nreturn [{ json: { markdown, bestanden, chatInput } }];\n"
+      },
+      "id": "0b54d3a3-e3fb-52d0-8aaa-35eec3ee460b",
+      "name": "Build Partijen Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'qwen2.5:7b', messages: [{ role: 'user', content: $json.chatInput }], format: 'json', stream: false, think: false, keep_alive: '5m', options: { temperature: 0, num_ctx: 8192, num_predict: 1500 } }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "dc37883c-5c81-56d3-aac6-b7a00b0d3fdd",
+      "name": "Partijen LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        200
+      ],
+      "notes": "Rechtstreeks naar Ollama, net als in de bespreking-workflow: de Ollama-node kan `think: false` niet meegeven. Het antwoord staat in message.content. Bij een fout loopt de workflow door; Bouw Dossier meldt dan dat dit deel handmatig moet.",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst JOB_PAD = `/data/shared/jobs/${$('Create Job').first().json.jobId}.json`;\n\nfunction werkJobBij(velden) {\n  let job = {};\n  try {\n    job = JSON.parse(fs.readFileSync(JOB_PAD, 'utf8'));\n  } catch (_) {\n    // Jobbestand weg (opgeruimd?): dan schrijven we het opnieuw aan.\n  }\n  const nieuw = { ...job, ...velden, bijgewerkt_op: new Date().toISOString() };\n  fs.writeFileSync(JOB_PAD, JSON.stringify(nieuw), 'utf8');\n  return nieuw;\n}\n\nwerkJobBij({ status: 'object en afspraken uitlezen', fase: 3 });\n\n// Tweede smalle vraag: het object en de afspraken. Een koopovereenkomst is al\n// gauw 40.000 tekens en past niet in het contextvenster; het overgrote deel is\n// standaardtekst. Past het document, dan gaat het heel mee. Anders alleen de\n// stukken rond de woorden waar de ingevulde gegevens bij staan.\nconst markdown = String($('Build Partijen Prompt').first().json.markdown || '');\n\nconst MAX_HEEL = 14000;\nconst VENSTER_VOOR = 250;\nconst VENSTER_NA = 900;\nconst ANKERS = [\n  /plaatselijk bekend/gi,\n  /kadastraal bekend/gi,\n  /koopsom van|koopprijs van|tegen een koopsom|koopsom bedraagt/gi,\n  /roerende zaken/gi,\n  /kosten koper|vrij op naam/gi,\n  /akte van levering zal|gepasseerd worden|ten overstaan van/gi,\n  /bankgarantie|waarborgsom/gi,\n  /ontbindende voorwaarde/gi,\n  /financiering van de onroerende zaak|hypothecaire geldlening/gi,\n  /nationale hypotheek garantie|bouwkundige keuring|huisvestingsvergunning/gi,\n  /erfpacht|canon/gi,\n  /ouderdomsclausule|asbest|nadere afspraken|bijzondere bepalingen|aanvullende bepalingen/gi,\n  /getekend te|ondertekend te|aldus overeengekomen/gi,\n  /makelaar/gi,\n];\n\nfunction fragmenten(tekst) {\n  const stukken = [];\n  for (const rx of ANKERS) {\n    let m;\n    let aantal = 0;\n    // Hooguit drie vindplaatsen per anker: 'koper' en 'notaris' staan in elke\n    // alinea, maar de ingevulde gegevens staan bij de eerste paar.\n    while ((m = rx.exec(tekst)) !== null && aantal < 3) {\n      stukken.push([Math.max(0, m.index - VENSTER_VOOR), Math.min(tekst.length, m.index + VENSTER_NA)]);\n      aantal++;\n    }\n  }\n  stukken.sort((a, b) => a[0] - b[0]);\n  const samen = [];\n  for (const s of stukken) {\n    const laatste = samen[samen.length - 1];\n    if (laatste && s[0] <= laatste[1]) laatste[1] = Math.max(laatste[1], s[1]);\n    else samen.push([...s]);\n  }\n  return samen.map(([a, b]) => tekst.slice(a, b).trim()).join('\\n[…]\\n');\n}\n\nlet selectie = markdown;\nlet ingekort = false;\nif (markdown.length > MAX_HEEL) {\n  selectie = fragmenten(markdown).slice(0, MAX_HEEL);\n  ingekort = true;\n}\n\nconst chatInput = `Je leest ${ingekort ? 'fragmenten uit' : ''} een Nederlandse koopovereenkomst voor een onroerende zaak. Haal het verkochte object en de afspraken eruit.\n\nGeef ALLEEN geldige JSON terug, precies in deze vorm:\n{\"object\":{\"straat_huisnummer\":\"\",\"postcode\":\"\",\"plaats\":\"\",\"omschrijving\":\"\",\"kadastrale_gemeente\":\"\",\"sectie\":\"\",\"perceelnummer\":\"\",\"grootte\":\"\"},\"koopsom\":\"\",\"roerende_zaken_bedrag\":\"\",\"kosten\":\"\",\"datum_levering\":\"\",\"notaris\":\"\",\"zekerheid_bedrag\":\"\",\"zekerheid_datum\":\"\",\"financiering_bedrag\":\"\",\"financiering_datum\":\"\",\"overige_voorbehouden\":[],\"bijzonderheden\":[],\"makelaar\":\"\",\"datum_ondertekening\":\"\"}\n\nRegels:\n- Neem gegevens letterlijk over uit het document. Verzin, vertaal of verbeter niets.\n- Staat een gegeven er niet, of staat er \"niet van toepassing\", laat het veld dan leeg.\n- object is het verkochte, niet het woonadres van een partij. omschrijving is de soort zaak, in hooguit tien woorden.\n- Bedragen in cijfers zoals ze er staan. Datums zoals ze er staan.\n- kosten is \"kosten koper\" of \"vrij op naam\".\n- datum_levering is de datum waarop de akte van levering wordt gepasseerd. notaris is de notaris of het kantoor dat daarbij wordt genoemd.\n- zekerheid_bedrag en zekerheid_datum horen bij de bankgarantie of waarborgsom.\n- financiering_bedrag en financiering_datum horen bij de ontbindende voorwaarde voor de financiering.\n- overige_voorbehouden: de andere ontbindende voorwaarden die zijn ingevuld, elk als {\"omschrijving\":\"\",\"datum\":\"\"}. Hooguit 5. De wettelijke bedenktijd hoort hier niet bij.\n- bijzonderheden: afspraken die afwijken van de standaardtekst, elk in één korte zin. Hooguit 6. Zijn er geen, geef dan een lege lijst.\n\nDOCUMENT:\n${selectie}`;\n\nreturn [{ json: { chatInput, ingekort } }];\n"
+      },
+      "id": "79e9a0bc-556b-52c3-b784-22bbc0699d26",
+      "name": "Build Transactie Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'qwen2.5:7b', messages: [{ role: 'user', content: $json.chatInput }], format: 'json', stream: false, think: false, keep_alive: '5m', options: { temperature: 0, num_ctx: 8192, num_predict: 1500 } }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "bb79fe12-06a0-5c1d-aa82-5127b042fe1b",
+      "name": "Transactie LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        200
+      ],
+      "notes": "Rechtstreeks naar Ollama, net als in de bespreking-workflow: de Ollama-node kan `think: false` niet meegeven. Het antwoord staat in message.content. Bij een fout loopt de workflow door; Bouw Dossier meldt dan dat dit deel handmatig moet.",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst JOB_PAD = `/data/shared/jobs/${$('Create Job').first().json.jobId}.json`;\n\nfunction werkJobBij(velden) {\n  let job = {};\n  try {\n    job = JSON.parse(fs.readFileSync(JOB_PAD, 'utf8'));\n  } catch (_) {\n    // Jobbestand weg (opgeruimd?): dan schrijven we het opnieuw aan.\n  }\n  const nieuw = { ...job, ...velden, bijgewerkt_op: new Date().toISOString() };\n  fs.writeFileSync(JOB_PAD, JSON.stringify(nieuw), 'utf8');\n  return nieuw;\n}\n\n// Maakt van de twee model-antwoorden één dossier en legt elk veld naast het\n// document. Uitgangspunt: het model mag voorstellen, het document beslist.\n//  - Kadastrale aanduiding en koopsom staan in elk koopmodel in een vaste\n//    formulering; die leest de code zelf en gaan vóór het model.\n//  - Elk ander veld moet in het document terug te vinden zijn. Lukt dat niet,\n//    dan komt het pad in 'twijfel' en kleurt de webapp het veld.\n//  - Bedragen die in cijfers én letters staan worden tegen elkaar gelegd.\nconst DOSSIER_MAP = '/data/shared/dossiers';\nconst bron = $('Build Partijen Prompt').first().json;\nconst upload = $('Lees Upload').first().json;\nconst maak = $('Create Job').first().json;\nconst markdown = String(bron.markdown || '');\n\n// ---------- model-antwoorden lezen ----------\nfunction leesAntwoord(j) {\n  if (!j || typeof j !== 'object') return null;\n  let ruw = j?.message?.content;\n  if (typeof ruw !== 'string') return null;\n  ruw = ruw.trim();\n  const start = ruw.indexOf('{');\n  const eind = ruw.lastIndexOf('}');\n  if (start === -1 || eind <= start) return null;\n  try {\n    return JSON.parse(ruw.slice(start, eind + 1));\n  } catch (_) {\n    return null;\n  }\n}\n\nconst partijen = leesAntwoord($('Partijen LLM').first()?.json);\nconst transactie = leesAntwoord($('Transactie LLM').first()?.json);\nconst meldingen = [];\nif (!partijen) {\n  meldingen.push({\n    ernst: 'kritiek',\n    titel: 'Partijen niet uitgelezen',\n    toelichting: 'Het model gaf geen bruikbaar antwoord op de vraag naar verkopers en kopers. Vul ze handmatig in.',\n  });\n}\nif (!transactie) {\n  meldingen.push({\n    ernst: 'kritiek',\n    titel: 'Object en afspraken niet uitgelezen',\n    toelichting: 'Het model gaf geen bruikbaar antwoord op de vraag naar het object en de afspraken. Vul ze handmatig in.',\n  });\n}\n\n// ---------- normaliseren ----------\nfunction tekst(v, max = 300) {\n  if (v == null || typeof v === 'object') return '';\n  const t = String(v).replace(/\\s+/g, ' ').trim();\n  // \"niet van toepassing\" is in een koopmodel een ingevuld vakje, geen gegeven.\n  if (/^(n\\.?v\\.?t\\.?|niet van toepassing|onbekend|geen|-+)$/i.test(t)) return '';\n  return t.slice(0, max);\n}\n\nconst MAANDEN = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'];\n\n/** Datum als 'JJJJ-MM-DD', of '' als er geen datum in staat. */\nfunction isoDatum(v) {\n  const t = String(v || '').toLowerCase();\n  let m = t.match(/\\b(\\d{1,2})\\s+([a-z]+)\\s+(\\d{4})\\b/);\n  if (m && MAANDEN.includes(m[2])) {\n    return `${m[3]}-${String(MAANDEN.indexOf(m[2]) + 1).padStart(2, '0')}-${m[1].padStart(2, '0')}`;\n  }\n  m = t.match(/\\b(\\d{1,2})[-/.](\\d{1,2})[-/.](\\d{4})\\b/);\n  if (m && +m[2] >= 1 && +m[2] <= 12) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;\n  m = t.match(/\\b(\\d{4})-(\\d{2})-(\\d{2})\\b/);\n  if (m) return m[0];\n  return '';\n}\n\nfunction datumVoluit(iso) {\n  const [j, m, d] = iso.split('-');\n  return `${+d} ${MAANDEN[+m - 1]} ${j}`;\n}\n\n/** Bedrag in hele centen, of null. */\nfunction centen(v) {\n  const m = String(v || '').match(/(\\d{1,3}(?:[.\\s]\\d{3})+|\\d+)(?:,(\\d{2}))?/);\n  if (!m) return null;\n  const c = parseInt(m[1].replace(/[.\\s]/g, ''), 10) * 100 + (m[2] ? parseInt(m[2], 10) : 0);\n  return Number.isFinite(c) && c > 0 ? c : null;\n}\n\nfunction bedragVoluit(c) {\n  const euro = Math.floor(c / 100).toString().replace(/\\B(?=(\\d{3})+(?!\\d))/g, '.');\n  return `€ ${euro},${String(c % 100).padStart(2, '0')}`;\n}\n\nfunction plat(s) {\n  return String(s || '')\n    .normalize('NFKD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase();\n}\n\n// ---------- wat staat er in het document ----------\nconst platDoc = plat(markdown);\nconst docWoorden = new Set(platDoc.match(/[a-z0-9@]+/g) || []);\n// Telefoonnummers en postcodes staan nu eens met en dan zonder spatie of streep.\nconst docAaneen = platDoc.replace(/[^a-z0-9]/g, '');\n\nconst docBedragen = new Set();\nfor (const m of markdown.matchAll(/(?:€|EUR|euro)\\s*((?:\\d{1,3}(?:\\.\\d{3})+|\\d+)(?:,\\d{2})?)/gi)) {\n  const c = centen(m[1]);\n  if (c) docBedragen.add(c);\n}\nconst docDatums = new Set();\nfor (const m of markdown.matchAll(/\\b\\d{1,2}\\s+[a-zA-Z]+\\s+\\d{4}\\b|\\b\\d{1,2}[-/.]\\d{1,2}[-/.]\\d{4}\\b/g)) {\n  const iso = isoDatum(m[0]);\n  if (iso) docDatums.add(iso);\n}\n\n/** Staat elke betekenisvolle lettergroep van de waarde in het document? */\nfunction staatErin(waarde) {\n  const woorden = plat(waarde).match(/[a-z0-9@]+/g) || [];\n  if (woorden.length === 0) return true;\n  if (woorden.every((w) => docWoorden.has(w))) return true;\n  return docAaneen.includes(plat(waarde).replace(/[^a-z0-9]/g, ''));\n}\n\nconst twijfel = [];\n\n/** Vrij tekstveld: overnemen en markeren als het niet in het document staat. */\nfunction veld(pad, v, max) {\n  const t = tekst(v, max);\n  if (t && !staatErin(t)) twijfel.push(pad);\n  return t;\n}\n\nfunction datumVeld(pad, v) {\n  const t = tekst(v);\n  if (!t) return '';\n  const iso = isoDatum(t);\n  if (!iso) {\n    twijfel.push(pad);\n    return t;\n  }\n  if (!docDatums.has(iso)) twijfel.push(pad);\n  return datumVoluit(iso);\n}\n\nfunction bedragVeld(pad, v) {\n  const t = tekst(v);\n  if (!t) return '';\n  const c = centen(t);\n  if (c == null) {\n    twijfel.push(pad);\n    return t;\n  }\n  if (!docBedragen.has(c)) twijfel.push(pad);\n  return bedragVoluit(c);\n}\n\n// ---------- partijen ----------\nfunction personen(lijst, rol) {\n  if (!Array.isArray(lijst)) return [];\n  return lijst\n    .filter((p) => p && typeof p === 'object')\n    .slice(0, 4)\n    .map((p, i) => {\n      const pad = (v) => `${rol}.${i}.${v}`;\n      const persoon = {\n        achternaam: veld(pad('achternaam'), p.achternaam),\n        voornamen: veld(pad('voornamen'), p.voornamen),\n        geboorteplaats: veld(pad('geboorteplaats'), p.geboorteplaats),\n        geboortedatum: datumVeld(pad('geboortedatum'), p.geboortedatum),\n        straat_huisnummer: veld(pad('straat_huisnummer'), p.straat_huisnummer),\n        postcode: veld(pad('postcode'), p.postcode),\n        woonplaats: veld(pad('woonplaats'), p.woonplaats),\n        burgerlijke_staat: veld(pad('burgerlijke_staat'), p.burgerlijke_staat),\n        legitimatie: veld(pad('legitimatie'), p.legitimatie),\n        telefoon: veld(pad('telefoon'), p.telefoon),\n        email: veld(pad('email'), p.email),\n      };\n      // Het koopmodel zet de postcode vaak vóór de woonplaats in één vakje.\n      const pc = persoon.woonplaats.match(/^(\\d{4}\\s?[A-Za-z]{2})\\s+(.+)$/);\n      if (pc && !persoon.postcode) {\n        persoon.postcode = pc[1].toUpperCase();\n        persoon.woonplaats = pc[2];\n      }\n      return persoon;\n    })\n    .filter((p) => p.achternaam || p.voornamen);\n}\n\nconst verkopers = personen(partijen?.verkopers, 'verkopers');\nconst kopers = personen(partijen?.kopers, 'kopers');\n// 'twijfel' kan paden bevatten van personen die net zijn weggefilterd; die\n// wijzen dan naar de verkeerde persoon. Lege personen komen alleen achteraan\n// voor, dus alles voorbij de lengte kan weg.\nfunction binnenBereik(pad) {\n  const m = pad.match(/^(verkopers|kopers)\\.(\\d+)\\./);\n  if (!m) return true;\n  return +m[2] < (m[1] === 'verkopers' ? verkopers : kopers).length;\n}\n\n// ---------- object ----------\nconst o = (transactie && typeof transactie.object === 'object' && transactie.object) || {};\nconst object = {\n  straat_huisnummer: veld('object.straat_huisnummer', o.straat_huisnummer),\n  postcode: veld('object.postcode', o.postcode),\n  plaats: veld('object.plaats', o.plaats),\n  omschrijving: veld('object.omschrijving', o.omschrijving),\n  kadastrale_gemeente: veld('object.kadastrale_gemeente', o.kadastrale_gemeente),\n  sectie: veld('object.sectie', o.sectie),\n  perceelnummer: veld('object.perceelnummer', o.perceelnummer),\n  grootte: veld('object.grootte', o.grootte),\n};\n\n// De kadastrale aanduiding heeft een vaste vorm; staat die er, dan gaat het\n// document vóór het model. Bij meer percelen blijft alleen het eerste staan en\n// volgt een melding.\nconst KAD_RX = /kadastraal bekend(?:\\s+als)?:?\\s+gemeente\\s+([^,;\\n]+?),?\\s+sectie\\s+([A-Z]{1,2}),?\\s+(?:nummers?|nrs?\\.?)\\s+(\\d+)/gi;\nconst percelen = [...markdown.matchAll(KAD_RX)];\nif (percelen.length > 0) {\n  const [, gemeente, sectie, nummer] = percelen[0];\n  object.kadastrale_gemeente = gemeente.trim();\n  object.sectie = sectie.toUpperCase();\n  object.perceelnummer = nummer;\n  for (const k of ['kadastrale_gemeente', 'sectie', 'perceelnummer']) {\n    const i = twijfel.indexOf(`object.${k}`);\n    if (i !== -1) twijfel.splice(i, 1);\n  }\n  const aantal = new Set(percelen.map((p) => `${p[2].toUpperCase()}${p[3]}`)).size;\n  if (aantal > 1) {\n    meldingen.push({\n      ernst: 'let op',\n      titel: `${aantal} kadastrale percelen in het document`,\n      toelichting: 'Alleen het eerste perceel is overgenomen. Vul de overige aan bij Bijzonderheden of in de omschrijving.',\n    });\n  }\n}\n\n// ---------- afspraken ----------\nconst t = transactie || {};\nconst afspraken = {\n  koopsom: bedragVeld('transactie.koopsom', t.koopsom),\n  roerende_zaken_bedrag: bedragVeld('transactie.roerende_zaken_bedrag', t.roerende_zaken_bedrag),\n  kosten: /vrij op naam|v\\.?o\\.?n/i.test(String(t.kosten || ''))\n    ? 'vrij op naam'\n    : /kosten koper|k\\.?k/i.test(String(t.kosten || ''))\n      ? 'kosten koper'\n      : '',\n  datum_levering: datumVeld('transactie.datum_levering', t.datum_levering),\n  notaris: veld('transactie.notaris', t.notaris),\n  zekerheid_bedrag: bedragVeld('transactie.zekerheid_bedrag', t.zekerheid_bedrag),\n  zekerheid_datum: datumVeld('transactie.zekerheid_datum', t.zekerheid_datum),\n  financiering_bedrag: bedragVeld('transactie.financiering_bedrag', t.financiering_bedrag),\n  financiering_datum: datumVeld('transactie.financiering_datum', t.financiering_datum),\n  makelaar: veld('transactie.makelaar', t.makelaar),\n  datum_ondertekening: datumVeld('transactie.datum_ondertekening', t.datum_ondertekening),\n  overige_voorbehouden: [],\n  bijzonderheden: [],\n};\n\n// De koopsom staat in het model achter 'koopsom van'; staat die er, dan gaat\n// het document vóór het model.\nconst koopsomDoc = markdown.match(/koop(?:som|prijs)\\s+(?:van|bedraagt|is)?:?\\s*(?:€|EUR)\\s*((?:\\d{1,3}(?:\\.\\d{3})+|\\d+)(?:,\\d{2})?)/i);\nif (koopsomDoc) {\n  const c = centen(koopsomDoc[1]);\n  if (c) {\n    const uitDoc = bedragVoluit(c);\n    if (afspraken.koopsom && afspraken.koopsom !== uitDoc) {\n      meldingen.push({\n        ernst: 'let op',\n        titel: 'Koopsom gecorrigeerd aan de hand van het document',\n        toelichting: `Het model las ${afspraken.koopsom}; achter 'koopsom' staat in het document ${uitDoc}. Het laatste is overgenomen.`,\n      });\n    }\n    afspraken.koopsom = uitDoc;\n    const i = twijfel.indexOf('transactie.koopsom');\n    if (i !== -1) twijfel.splice(i, 1);\n  }\n}\n\n// Lijsten: een punt dat niet in het document staat is geen twijfelgeval maar\n// vrijwel zeker een echo van de prompt. Die laten we weg in plaats van hem te\n// markeren. Voor een zin geldt: het merendeel van de inhoudswoorden moet er\n// staan, want het model vat samen en gebruikt dus ook eigen woorden.\nfunction gedekt(zin, drempel) {\n  const woorden = (plat(zin).match(/[a-z0-9]+/g) || []).filter((w) => w.length > 3);\n  if (woorden.length === 0) return false;\n  return woorden.filter((w) => docWoorden.has(w)).length / woorden.length >= drempel;\n}\n\nif (Array.isArray(t.overige_voorbehouden)) {\n  for (const v of t.overige_voorbehouden.slice(0, 5)) {\n    if (!v || typeof v !== 'object') continue;\n    const omschrijving = tekst(v.omschrijving, 240);\n    const iso = isoDatum(v.datum);\n    if (!omschrijving || !gedekt(omschrijving, 0.6)) continue;\n    // Een voorbehoud zonder datum die in het document staat is niet ingevuld.\n    if (!iso || !docDatums.has(iso)) continue;\n    // De financiering heeft een eigen veld; hier alleen de overige.\n    if (/financiering|hypothecaire geldlening/i.test(omschrijving) && datumVoluit(iso) === afspraken.financiering_datum) continue;\n    afspraken.overige_voorbehouden.push({ omschrijving, datum: datumVoluit(iso) });\n  }\n}\nif (Array.isArray(t.bijzonderheden)) {\n  for (const b of t.bijzonderheden.slice(0, 6)) {\n    const zin = tekst(b, 300);\n    // Een voorbehoud hoort in de lijst hierboven, waar een datum uit het\n    // document voor nodig is. Zonder die eis maakte het model van een\n    // doorgehaalde NHG-bepaling een voorbehoud.\n    if (/ontbind|ontbonden|voorbehoud/i.test(zin)) continue;\n    if (zin && gedekt(zin, 0.6)) afspraken.bijzonderheden.push(zin);\n  }\n}\n\n// ---------- cijfers tegen letters ----------\nconst EENHEDEN = ['nul', 'een', 'twee', 'drie', 'vier', 'vijf', 'zes', 'zeven', 'acht', 'negen', 'tien', 'elf', 'twaalf', 'dertien', 'veertien', 'vijftien', 'zestien', 'zeventien', 'achttien', 'negentien'];\nconst TIENTALLEN = ['', '', 'twintig', 'dertig', 'veertig', 'vijftig', 'zestig', 'zeventig', 'tachtig', 'negentig'];\nfunction onder100(n) {\n  if (n < 20) return EENHEDEN[n];\n  const e = n % 10;\n  return e ? `${EENHEDEN[e]}en${TIENTALLEN[Math.floor(n / 10)]}` : TIENTALLEN[n / 10];\n}\nfunction onder1000(n) {\n  if (n < 100) return onder100(n);\n  const h = Math.floor(n / 100);\n  const rest = n % 100;\n  return `${h === 1 ? '' : EENHEDEN[h]}honderd${rest ? onder100(rest) : ''}`;\n}\nfunction inWoorden(n) {\n  if (!Number.isInteger(n) || n < 0 || n > 999999999) return null;\n  if (n < 1000) return onder1000(n);\n  if (n < 1000000) {\n    const d = Math.floor(n / 1000);\n    const rest = n % 1000;\n    return `${d === 1 ? '' : onder1000(d)}duizend${rest ? onder1000(rest) : ''}`;\n  }\n  const m = Math.floor(n / 1000000);\n  const rest = n % 1000000;\n  return `${onder1000(m)}miljoen${rest ? inWoorden(rest) : ''}`;\n}\n// Spaties, trema's en streepjes wegen niet mee: 'zevenduizend vijfhonderd' en\n// 'zevenduizendvijfhonderd' zijn hetzelfde bedrag.\nfunction kaal(woorden) {\n  return plat(woorden).replace(/[^a-z]/g, '');\n}\n\nfor (const m of markdown.matchAll(/(?:€|EUR)\\s*((?:\\d{1,3}(?:\\.\\d{3})+|\\d+)(?:,\\d{2})?)\\s*\\(?\\s*(?:zegge|in letters):?\\s*([^)\\n]{3,160})\\)?/gi)) {\n  const c = centen(m[1]);\n  // Alleen hele euro's: centen in letters kennen te veel schrijfwijzen.\n  if (!c || c % 100 !== 0) continue;\n  const verwacht = inWoorden(c / 100);\n  const staat = kaal(m[2].replace(/\\beuro'?s?\\b.*$/i, ''));\n  if (verwacht && staat && kaal(verwacht) !== staat) {\n    meldingen.push({\n      ernst: 'kritiek',\n      titel: 'Bedrag in cijfers en in letters verschilt',\n      toelichting: `In het document staat ${bedragVoluit(c)}, maar in letters \"${m[2].trim()}\". Vraag na welk bedrag is bedoeld.`,\n    });\n  }\n}\n\n// ---------- dossier wegschrijven ----------\nconst nu = new Date().toISOString();\nconst id = `d_${maak.stempel}_${String($execution.id || Date.now()).replace(/[^0-9A-Za-z]/g, '')}`;\nconst dossier = {\n  id,\n  dossiernummer: upload.dossiernummer || '',\n  soort: 'levering',\n  status: 'concept',\n  verkopers,\n  kopers,\n  object,\n  transactie: afspraken,\n  notitie: '',\n  twijfel: [...new Set(twijfel)].filter(binnenBereik),\n  meldingen,\n  bron: { bestanden: bron.bestanden || [], tekens: markdown.length, uitgelezen_op: nu },\n  historie: [{ op: nu, door: upload.auteur || '', actie: 'uitgelezen uit koopovereenkomst' }],\n  aangemaakt_op: nu,\n  bijgewerkt_op: nu,\n};\n\n// Eerst naar een tijdelijk bestand en dan hernoemen: een afgebroken schrijfactie\n// laat zo nooit een half JSON-bestand achter.\nfs.mkdirSync(DOSSIER_MAP, { recursive: true });\nconst pad = `${DOSSIER_MAP}/${id}.json`;\nconst tmp = `${pad}.${Date.now()}.tmp`;\nfs.writeFileSync(tmp, JSON.stringify(dossier, null, 2) + '\\n');\nfs.renameSync(tmp, pad);\n\nwerkJobBij({ status: 'klaar', fase: 4, resultaat: { success: true, dossier } });\n\nreturn [{ json: { dossier_id: id } }];\n"
+      },
+      "id": "4f4e4d1f-c369-5f5d-a123-bf964e6639d7",
+      "name": "Bouw Dossier",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "dossiers",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "eb0bda3b-1b52-5dba-ad37-1ad0b4353aca",
+      "name": "Webhook GET dossiers",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        760
+      ],
+      "webhookId": "dossiers-lezen"
+    },
+    {
+      "parameters": {
+        "jsCode": "// GET /webhook/dossiers        -> overzicht, nieuwste eerst\n// GET /webhook/dossiers?id=... -> één volledig dossier\nconst fs = require('fs');\nconst MAP = '/data/shared/dossiers';\n\n// Alleen een ontbrekend bestand telt als 'bestaat niet'. Elke andere leesfout\n// (EIO als macOS het bestand naar iCloud heeft weggeschreven) gooien we door:\n// anders zou een volgende opslag een bestaand dossier leeg overschrijven.\nfunction lees(id) {\n  try {\n    return JSON.parse(fs.readFileSync(`${MAP}/${id}.json`, 'utf8'));\n  } catch (err) {\n    if (err.code === 'ENOENT') return null;\n    throw new Error(`Kon dossier ${id} niet lezen: ${err.message}`);\n  }\n}\n\n// We serialiseren zelf en laten de Respond-node de tekst onaangeroerd\n// doorgeven; met respondWith=json komen regeleinden uit vrije tekst ongeëscaped\n// in het antwoord terecht.\nfunction antwoord(payload) {\n  return [{ json: { payload: JSON.stringify(payload) } }];\n}\n\n// Een id komt uit Bouw Dossier en bestaat alleen uit deze tekens; zo kan een\n// geknutselde parameter niet uit de dossiermap wegwandelen.\nfunction schoonId(v) {\n  const id = String(v || '');\n  return /^d_[0-9A-Za-z_]{6,60}$/.test(id) ? id : '';\n}\n\nfunction naam(p) {\n  return [p.voornamen, p.achternaam].filter(Boolean).join(' ');\n}\n\n// Verwachte fouten als {success:false} teruggeven: een throw levert bij\n// responseMode=responseNode een leeg 200-antwoord op.\ntry {\n  const query = $json.query || {};\n  if (query.id !== undefined) {\n    const id = schoonId(query.id);\n    const dossier = id ? lees(id) : null;\n    if (!dossier) return antwoord({ success: false, error: 'Dit dossier bestaat niet (meer).' });\n    return antwoord({ success: true, dossier });\n  }\n\n  let bestanden = [];\n  try {\n    bestanden = fs.readdirSync(MAP).filter((n) => /^d_[0-9A-Za-z_]+\\.json$/.test(n));\n  } catch (err) {\n    if (err.code !== 'ENOENT') throw err;\n  }\n\n  const dossiers = [];\n  const onleesbaar = [];\n  for (const bestand of bestanden) {\n    try {\n      const d = lees(bestand.replace(/\\.json$/, ''));\n      if (!d) continue;\n      dossiers.push({\n        id: d.id,\n        dossiernummer: d.dossiernummer || '',\n        soort: d.soort || '',\n        status: d.status || 'concept',\n        adres: [d.object?.straat_huisnummer, d.object?.plaats].filter(Boolean).join(', '),\n        verkopers: (d.verkopers || []).map(naam).filter(Boolean),\n        kopers: (d.kopers || []).map(naam).filter(Boolean),\n        datum_levering: d.transactie?.datum_levering || '',\n        open_punten: (d.twijfel || []).length,\n        bijgewerkt_op: d.bijgewerkt_op || d.aangemaakt_op || '',\n      });\n    } catch (_) {\n      // Eén onleesbaar dossier mag het overzicht niet leeg maken.\n      onleesbaar.push(bestand);\n    }\n  }\n  dossiers.sort((a, b) => String(b.bijgewerkt_op).localeCompare(String(a.bijgewerkt_op)));\n  return antwoord({ success: true, dossiers, onleesbaar });\n} catch (err) {\n  return antwoord({ success: false, error: err.message });\n}\n"
+      },
+      "id": "a9ffed04-05b6-530f-871d-e52574528995",
+      "name": "Lees Dossiers",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.payload }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "1905cc0f-e3c4-5ba0-9944-3c1b4c6e5fae",
+      "name": "Respond GET dossiers",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dossier-opslaan",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "c014d5ff-6365-586f-b9d3-f98660421ea0",
+      "name": "Webhook POST dossier",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        960
+      ],
+      "webhookId": "dossiers-opslaan"
+    },
+    {
+      "parameters": {
+        "jsCode": "// POST /webhook/dossier-opslaan\n// Invoer (form-urlencoded veld 'data', JSON):\n//   { actie: 'opslaan' | 'bevestigen' | 'heropenen' | 'verwijderen',\n//     id, auteur, basis, dossier }\n// 'basis' is de bijgewerkt_op die de webapp heeft geladen; wijkt die af van wat\n// er op schijf staat, dan heeft een collega het dossier intussen gewijzigd.\nconst fs = require('fs');\nconst MAP = '/data/shared/dossiers';\n\n// Alleen een ontbrekend bestand telt als 'bestaat niet'. Elke andere leesfout\n// (EIO als macOS het bestand naar iCloud heeft weggeschreven) gooien we door:\n// anders zou een volgende opslag een bestaand dossier leeg overschrijven.\nfunction lees(id) {\n  try {\n    return JSON.parse(fs.readFileSync(`${MAP}/${id}.json`, 'utf8'));\n  } catch (err) {\n    if (err.code === 'ENOENT') return null;\n    throw new Error(`Kon dossier ${id} niet lezen: ${err.message}`);\n  }\n}\n\n// We serialiseren zelf en laten de Respond-node de tekst onaangeroerd\n// doorgeven; met respondWith=json komen regeleinden uit vrije tekst ongeëscaped\n// in het antwoord terecht.\nfunction antwoord(payload) {\n  return [{ json: { payload: JSON.stringify(payload) } }];\n}\n\n// Een id komt uit Bouw Dossier en bestaat alleen uit deze tekens; zo kan een\n// geknutselde parameter niet uit de dossiermap wegwandelen.\nfunction schoonId(v) {\n  const id = String(v || '');\n  return /^d_[0-9A-Za-z_]{6,60}$/.test(id) ? id : '';\n}\n\nfunction tekst(v, max) {\n  if (v == null || typeof v === 'object') return '';\n  return String(v).replace(/\\r\\n/g, '\\n').trim().slice(0, max);\n}\n\nconst PERSOON = ['achternaam', 'voornamen', 'geboorteplaats', 'geboortedatum', 'straat_huisnummer', 'postcode', 'woonplaats', 'burgerlijke_staat', 'legitimatie', 'telefoon', 'email'];\nconst OBJECT = ['straat_huisnummer', 'postcode', 'plaats', 'omschrijving', 'kadastrale_gemeente', 'sectie', 'perceelnummer', 'grootte'];\nconst AFSPRAAK = ['koopsom', 'roerende_zaken_bedrag', 'kosten', 'datum_levering', 'notaris', 'zekerheid_bedrag', 'zekerheid_datum', 'financiering_bedrag', 'financiering_datum', 'makelaar', 'datum_ondertekening'];\n\n// Alleen bekende velden overnemen: wat de webapp meestuurt gaat rechtstreeks\n// naar schijf, dus een onbekende sleutel hoort daar niet te belanden.\nfunction velden(bron, namen, max = 300) {\n  const uit = {};\n  for (const n of namen) uit[n] = tekst(bron && bron[n], max);\n  return uit;\n}\n\nfunction personen(lijst) {\n  if (!Array.isArray(lijst)) return [];\n  return lijst.slice(0, 8).map((p) => velden(p, PERSOON));\n}\n\nlet inv;\ntry {\n  const body = $json.body || {};\n  inv = typeof body.data === 'string' ? JSON.parse(body.data) : body.data || body;\n} catch (err) {\n  return antwoord({ success: false, error: 'Ongeldige invoer: ' + err.message });\n}\n\ntry {\n  const id = schoonId(inv.id);\n  const bestaand = id ? lees(id) : null;\n  if (!bestaand) return antwoord({ success: false, error: 'Dit dossier bestaat niet (meer).' });\n\n  if (inv.basis && bestaand.bijgewerkt_op && inv.basis !== bestaand.bijgewerkt_op) {\n    return antwoord({\n      success: false,\n      error: 'Dit dossier is intussen door iemand anders gewijzigd. Laad het opnieuw voordat je opslaat.',\n    });\n  }\n\n  const actie = String(inv.actie || 'opslaan');\n  const nu = new Date().toISOString();\n  const auteur = tekst(inv.auteur, 80);\n  const pad = `${MAP}/${id}.json`;\n\n  if (actie === 'verwijderen') {\n    // Niet weggooien maar opzijzetten: een dossier bevat handmatig nagekeken\n    // gegevens en een misklik moet terug te draaien zijn.\n    fs.mkdirSync(`${MAP}/.verwijderd`, { recursive: true });\n    fs.renameSync(pad, `${MAP}/.verwijderd/${id}_${Date.now()}.json`);\n    return antwoord({ success: true, verwijderd: id });\n  }\n  if (!['opslaan', 'bevestigen', 'heropenen'].includes(actie)) {\n    return antwoord({ success: false, error: `Onbekende actie: ${actie}` });\n  }\n\n  const d = inv.dossier || {};\n  const t = d.transactie || {};\n  const nieuw = {\n    ...bestaand,\n    dossiernummer: tekst(d.dossiernummer, 40),\n    verkopers: personen(d.verkopers),\n    kopers: personen(d.kopers),\n    object: velden(d.object, OBJECT),\n    transactie: {\n      ...velden(t, AFSPRAAK),\n      overige_voorbehouden: (Array.isArray(t.overige_voorbehouden) ? t.overige_voorbehouden : [])\n        .slice(0, 12)\n        .map((v) => ({ omschrijving: tekst(v && v.omschrijving, 300), datum: tekst(v && v.datum, 40) }))\n        .filter((v) => v.omschrijving || v.datum),\n      bijzonderheden: (Array.isArray(t.bijzonderheden) ? t.bijzonderheden : [])\n        .slice(0, 20)\n        .map((b) => tekst(b, 400))\n        .filter(Boolean),\n    },\n    notitie: tekst(d.notitie, 4000),\n    twijfel: (Array.isArray(d.twijfel) ? d.twijfel : []).map((p) => tekst(p, 80)).filter(Boolean).slice(0, 200),\n    bijgewerkt_op: nu,\n  };\n  if (actie === 'bevestigen') nieuw.status = 'bevestigd';\n  if (actie === 'heropenen') nieuw.status = 'concept';\n\n  const omschrijving = { opslaan: 'gewijzigd', bevestigen: 'gecontroleerd en bevestigd', heropenen: 'heropend' }[actie];\n  nieuw.historie = [...(bestaand.historie || []), { op: nu, door: auteur, actie: omschrijving }].slice(-100);\n\n  // Eerst naar een tijdelijk bestand en dan hernoemen: een afgebroken\n  // schrijfactie laat zo nooit een half JSON-bestand achter.\n  const tmp = `${pad}.${Date.now()}.tmp`;\n  fs.writeFileSync(tmp, JSON.stringify(nieuw, null, 2) + '\\n');\n  fs.renameSync(tmp, pad);\n  return antwoord({ success: true, dossier: nieuw });\n} catch (err) {\n  return antwoord({ success: false, error: err.message });\n}\n"
+      },
+      "id": "7db35a5d-5672-5437-851f-f44c956307e9",
+      "name": "Bewaar Dossier",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.payload }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "ab0ddd6b-7960-57a4-bdb0-ce99e7f2879d",
+      "name": "Respond POST dossier",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 📑 KOOPOVEREENKOMST → DOSSIER (job-patroon)\n`POST /webhook/koopovereenkomst` (multipart: pdf/docx, optioneel `dossiernummer`, `auteur`). Antwoordt meteen met een `job_id`; de webapp pollt `/webhook/job-status`.\n\nTwee smalle vragen aan het model (partijen, daarna object en afspraken) in plaats van één grote. **Bouw Dossier** legt daarna elk veld naast het document: kadastrale aanduiding en koopsom leest de code zelf, elk ander veld moet letterlijk terug te vinden zijn en komt anders in `twijfel`. Het dossier wordt als concept weggeschreven in `/data/shared/dossiers/`.\n\nStatussen: `document omzetten` → `partijen uitlezen` → `object en afspraken uitlezen` → `klaar`.",
+        "height": 340,
+        "width": 2460,
+        "color": 5
+      },
+      "id": "ae6e014c-1616-518f-beca-3bfe1b060087",
+      "name": "Sticky: uitlezen",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🗂️ DOSSIERS\n`GET /webhook/dossiers` — overzicht; met `?id=` één dossier.\n`POST /webhook/dossier-opslaan` — `actie`: opslaan / bevestigen / heropenen / verwijderen.\n\nEen dossier is één JSON-bestand. Verwijderen zet het opzij in `.verwijderd/`.",
+        "height": 500,
+        "width": 760,
+        "color": 7
+      },
+      "id": "6c67a8b7-0c95-53aa-af74-e0da9eb37ffd",
+      "name": "Sticky: dossiers",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Koopovereenkomst": {
+      "main": [
+        [
+          {
+            "node": "Create Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Job": {
+      "main": [
+        [
+          {
+            "node": "Respond Job Id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Job Id": {
+      "main": [
+        [
+          {
+            "node": "Lees Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lees Upload": {
+      "main": [
+        [
+          {
+            "node": "Docling Convert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Docling Convert": {
+      "main": [
+        [
+          {
+            "node": "Extract Markdown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Markdown": {
+      "main": [
+        [
+          {
+            "node": "Build Partijen Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Partijen Prompt": {
+      "main": [
+        [
+          {
+            "node": "Partijen LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Partijen LLM": {
+      "main": [
+        [
+          {
+            "node": "Build Transactie Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Transactie Prompt": {
+      "main": [
+        [
+          {
+            "node": "Transactie LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transactie LLM": {
+      "main": [
+        [
+          {
+            "node": "Bouw Dossier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook GET dossiers": {
+      "main": [
+        [
+          {
+            "node": "Lees Dossiers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lees Dossiers": {
+      "main": [
+        [
+          {
+            "node": "Respond GET dossiers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook POST dossier": {
+      "main": [
+        [
+          {
+            "node": "Bewaar Dossier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bewaar Dossier": {
+      "main": [
+        [
+          {
+            "node": "Respond POST dossier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "foutafhandeling"
+  },
+  "versionId": "9f6de8d7-caf5-4c6b-b5dc-db6fa3eba3dd",
+  "meta": {
+    "instanceId": "self-hosted-ai-starter-kit"
+  },
+  "id": "dossiers"
+}

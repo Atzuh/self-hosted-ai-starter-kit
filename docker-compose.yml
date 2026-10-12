@@ -144,6 +144,8 @@ services:
           # niet aan en blijft een mislukte run als 'bezig' in beeld staan.
           n8n publish:workflow --id=foutafhandeling
           n8n publish:workflow --id=kantoor-instellingen
+          n8n publish:workflow --id=dashboard
+          n8n publish:workflow --id=dossiers
           touch /demo-data/.imported
           echo "Import complete"
         fi
